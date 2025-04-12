@@ -1,0 +1,4848 @@
+name: WebApp_202504
+description: ''
+author: LabGeoInf
+host: ''
+api_set: {}
+script:
+content: |-
+///////////////////////////////////////////////////////webApp.js///////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////Leaflet.AwesomeMarkers///////////////////////////////////////////////////////
+
+/*
+  Leaflet.AwesomeMarkers, a plugin that adds colorful iconic markers for Leaflet, based on the Font Awesome icons
+  (c) 2012-2013, Lennard Voogdt
+
+  http://leafletjs.com
+  https://github.com/lvoogdt
+*/
+
+/*global L*/
+
+(function(window, document, undefined) {
+  "use strict";
+  /*
+   * Leaflet.AwesomeMarkers assumes that you have already included the Leaflet library.
+   */
+
+  L.AwesomeMarkers = {};
+
+  L.AwesomeMarkers.version = "2.0.1";
+
+  L.AwesomeMarkers.Icon = L.Icon.extend({
+    options: {
+      iconSize: [35, 45],
+      iconAnchor: [17, 42],
+      popupAnchor: [1, -32],
+      shadowAnchor: [10, 12],
+      shadowSize: [36, 16],
+      className: "awesome-marker",
+      prefix: "glyphicon",
+      spinClass: "fa-spin",
+      extraClasses: "",
+      icon: "home",
+      markerColor: "blue",
+      iconColor: "white"
+    },
+
+    initialize: function(options) {
+      options = L.Util.setOptions(this, options);
+    },
+
+    createIcon: function() {
+      var div = document.createElement("div"),
+        options = this.options;
+
+      if (options.icon) {
+        div.innerHTML = this._createInner();
+      }
+
+      if (options.bgPos) {
+        div.style.backgroundPosition = -options.bgPos.x + "px " + -options.bgPos.y + "px";
+      }
+
+      this._setIconStyles(div, "icon-" + options.markerColor);
+      return div;
+    },
+
+    _createInner: function() {
+      var iconClass,
+        iconSpinClass = "",
+        iconColorClass = "",
+        iconColorStyle = "",
+        options = this.options;
+
+      if (options.icon.slice(0, options.prefix.length + 1) === options.prefix + "-") {
+        iconClass = options.icon;
+      } else {
+        iconClass = options.prefix + "-" + options.icon;
+      }
+
+      if (options.spin && typeof options.spinClass === "string") {
+        iconSpinClass = options.spinClass;
+      }
+
+      if (options.iconColor) {
+        if (options.iconColor === "white" || options.iconColor === "black") {
+          iconColorClass = "icon-" + options.iconColor;
+        } else {
+          iconColorStyle = "style='color: " + options.iconColor + "' ";
+        }
+      }
+
+      return (
+        "<i " +
+        iconColorStyle +
+        "class='" +
+        options.extraClasses +
+        " " +
+        options.prefix +
+        " " +
+        iconClass +
+        " " +
+        iconSpinClass +
+        " " +
+        iconColorClass +
+        "'></i>"
+      );
+    },
+
+    _setIconStyles: function(img, name) {
+      var options = this.options,
+        size = L.point(options[name === "shadow" ? "shadowSize" : "iconSize"]),
+        anchor;
+
+      if (name === "shadow") {
+        anchor = L.point(options.shadowAnchor || options.iconAnchor);
+      } else {
+        anchor = L.point(options.iconAnchor);
+      }
+
+      if (!anchor && size) {
+        anchor = size.divideBy(2, true);
+      }
+
+      img.className = "awesome-marker-" + name + " " + options.className;
+
+      if (anchor) {
+        img.style.marginLeft = -anchor.x + "px";
+        img.style.marginTop = -anchor.y + "px";
+      }
+
+      if (size) {
+        img.style.width = size.x + "px";
+        img.style.height = size.y + "px";
+      }
+    },
+
+    createShadow: function() {
+      var div = document.createElement("div");
+
+      this._setIconStyles(div, "shadow");
+      return div;
+    }
+  });
+
+  L.AwesomeMarkers.icon = function(options) {
+    return new L.AwesomeMarkers.Icon(options);
+  };
+})(this, document);
+
+///////////////////////////////////////////////////////file_variabili///////////////////////////////////////////////////////
+
+//Mappa
+var mappa;
+
+//Mappa di Base
+var mappaDiBase;
+
+//Overlay Layer
+//L.layerGroup();
+
+//lat, lng, zoom
+var latitudine = 45.82;
+var longitudine = 10.88;
+var zoom = 10;
+
+//Flussi pendolarismo
+var array_flussi = [];
+var array_collegamentiFlussi = [];
+
+//Limiti mappa
+var latNE = null;
+var lngNE = null;
+var latSW = null;
+var lngSW = null;
+
+//Stato dei comandi
+var stato_calcolaDistanzaSullaMappa = false;
+var stato_calcolaAreaSullaMappa = false;
+var stato_trovaPercorsoSullaMappa = false;
+var stato_calcoloCostoMinimo = false;
+var stato_selezionaRipristinaMarkerPOISiaAttiviSiaStazioniEsistenti = false;
+
+//Termina operazione
+var terminaOperazione = false;
+
+/*
+Esempio:
+area[ name="Veneto" ];
+node [place~"city|town|hamlet|village"][name="Adria"](area);
+out;
+*/
+
+//Classe
+class Turf {
+  constructor(turfObject, turfColor) {
+    if (turfObject == null && turfColor == null) {
+      this.turf = null;
+      this.geoJSON = null;
+    } else {
+      this.turf = turfObject;
+      this.geoJSON = new L.geoJSON(turfObject, {
+        style: function(feature) {
+          return { color: turfColor, fillOpacity: 0.1 };
+        }
+      });
+    }
+  }
+}
+
+//Marker personalizzato
+markerPersonalizzato = L.Marker.extend({
+  options: {
+    //"options" obbligatorio!
+    coordinate: "",
+    amenity: "",
+    nome: "",
+    tipoMarker: "",
+    numeroMarkerInserimento: "",
+    fattoreImpianto: "Non specificato",
+    sommatoriaFlussi: "Non specificato",
+    fattorePendolarismo: "Non specificato",
+    turfDistanza: new Turf(null, null)
+  }
+});
+
+//Variabili
+var areaInMappa = 0.0;
+var densitaAbitativa = 0.0;
+var numeroClientiPerComunita = 3500.0;
+var euroSpesiPerChilometroAutoElettrica = 0.5;
+var costoAttivazioneManutenzioneImpianto1 = 120.0;
+var costoAttivazioneManutenzioneImpianto2 = 1200.0;
+var tipoDistanza = "Euclidea"; //Euclidea, Manhattan
+
+//FattoreImpianto
+var fattoreImpiantoClienti = "Not expected"; //"Non previsto";
+var fattoreImpiantoMercatiPOI = 0.4;
+var fattoreImpiantostazioniEsistentiPOI = 1.0;
+var fattoreImpiantoParcheggiPOI = 0.5;
+var fattorePendolarismo = 1.0;
+var sommatoriaFlussi = 0.0;
+
+//AHP
+var array_punteggioAHP = [
+  [1.0, 1.0, 1.0, 1.0],
+  [1.0, 1.0, 1.0, 1.0],
+  [1.0, 1.0, 1.0, 1.0],
+  [1.0, 1.0, 1.0, 1.0]
+];
+var CR = undefined;
+var tipologiaMediaMatriceAHP = "aritmetica"; //aritmetica, geometrica
+var criteriPV = [];
+var distPV = [];
+var cAttPV = [];
+var cTotPV = [];
+var fattImpPV = [];
+var array_datiAHP = [];
+
+//Marker sulla mappa
+var array_markerClienti = [];
+var array_markerPOI = [];
+//var array_markerPOISelezionati = [];
+
+//Combinazioni e costo minimo
+var array_costiAfferenza = [];
+var array_costiAttivazioneManutenzione = [];
+var array_distanzaClientiPOI = [];
+var opzioneGreedy = false;
+var varianteGreedy = ""; //combinazioneMarker, markerAttivi
+
+//var numeroDiCombinazioniMassimo = 0;
+var costoMinimoPerPOI = Number.POSITIVE_INFINITY;
+var array_markerPOIAttivi = [];
+var array_markerPOINONAttiviEsistenti = [];
+var array_costoMinimoPerPOI = [];
+var array_collegamentiCostoMinimoPerPOI = [];
+var array_collegamentiTemporanei = [];
+
+//Calcola distanza sulla mappa
+var array_calcolaDistanzaSullaMappa = [];
+var polilineaTemp_calcolaDistanzaSullaMappa = ottieniPolilinea([], "");
+var polilinea_calcolaDistanzaSullaMappa = ottieniPolilinea([], "");
+var distanzaSullaMappa = 0;
+
+//Calcola area sulla mappa
+var array_calcolaAreaSullaMappa = [];
+var areaTemp_calcolaAreaSullaMappa = new Turf(null, null);
+var area_calcolaAreaSullaMappa = new Turf(null, null);
+var areaSullaMappa = 0;
+
+//Trova percorso sulla mappa
+var array_inizioFinePercorso = [];
+var array_puntiDelPercorso = [];
+var array_markerAllaRicarica = [];
+var livelloCarica = 20;
+var autonomiaMacchina = 100.0;
+var autonomiaPrevista = 20.0;
+var profileOSRM = "car";
+var lineString_trovaPercorsoSullaMappa = new Turf(null, null);
+var distanzaTotalePercorsa = 0.0;
+var array_distanzaIntersezioni = [];
+
+//Mostra variabili
+var testo_mostraVariabili = "";
+
+//Excel file
+var sheetVar;
+var rangeVar;
+var rowVar = 0;
+
+var sheetSADuAloc;
+var rangeSADuAloc;
+var rowSADuAloc;
+
+var sheetSASPLA;
+var rangeSASPLA;
+var rowSASPLA;
+
+//var row...
+
+var primaAperturaExcel;
+
+///////////////////////////////////////////////////////file_calcolaCostoMinimoCombinazioniAssegnate///////////////////////////////////////////////////////
+
+async function calcolaCostoMinimoPerCombinazioni() {
+  stato_calcoloCostoMinimo = true;
+
+  var array_markerPOISelezionati = array_markerPOI;
+
+  rimuoviCostoMinimoAlgoritmi(false, false);
+
+  const risposta = await calcolaCostoMinimoPerPOISelezionati(array_markerPOISelezionati);
+
+  stato_calcoloCostoMinimo = false;
+}
+
+function calcolaCostoMinimoPerPOISelezionati(array_markerPOISelezionati) {
+  return new Promise((resolve, reject) => {
+    print3("*** COMBINATION OF ASSIGNED POI MARKER NUMBER ***");
+
+    print3("Number of POI Markers considered: " + array_markerPOISelezionati.length);
+
+    if (array_markerPOISelezionati.length == 0) {
+      print3("The number of POI Markers identified on the map is equal to 0; operation terminated.");
+      reject("Operazione interrotta");
+      return;
+    }
+    if (array_markerClienti.length == 0) {
+      print3("The number of Customer Markers identified on the map is equal to 0; operation terminated.");
+      reject("Operazione interrotta");
+      return;
+    }
+
+    var numeroDiCombinazioniMassimo = parseFloat(
+      Math.pow(array_markerPOISelezionati.length, array_markerClienti.length),
+      10
+    );
+    if (array_markerClienti.length == 0) {
+      numeroDiCombinazioniMassimo = 0;
+    }
+
+    var arrayDiCombinazioni = [];
+    for (var i = 0; i < array_markerClienti.length; i++) {
+      arrayDiCombinazioni.push(0);
+    }
+
+    var operazioniFinali = () => {
+      array_markerPOIAttivi = ordinaArray(JSON.parse(JSON.stringify(Array.from(new Set(array_costoMinimoPerPOI)))));
+
+      collegamentiInMappaMarkerPOIClienti();
+
+      print3(
+        "\tAchieved results: " +
+          "\n" +
+          "\tMinimum cost [Euro]: " +
+          costoMinimoPerPOI.toFixed(2) +
+          "\n" +
+          "\tMinimum cost combination [MarkerNumber]: " +
+          array_costoMinimoPerPOI
+      );
+
+      clearInterval(iv);
+
+      resolve("Operazione terminata");
+    };
+
+    var statoAvanzamento = () => {
+      if (j <= numeroDiCombinazioniMassimo * 0.01 && numeroDiCombinazioniMassimo > 1) {
+        document.getElementById("progressBarCombinazioni").value = "0";
+      } else {
+        document.getElementById("progressBarCombinazioni").value =
+          "" + parseInt(((j + 1.0) / numeroDiCombinazioniMassimo) * 100.0, 10);
+      }
+
+      document.getElementById("avanzamento").value =
+        "" + (j + 1.0).toLocaleString("it") + " / " + numeroDiCombinazioniMassimo.toLocaleString("it");
+    };
+
+    var j = 0;
+    var iv = setInterval(function() {
+      if (terminaOperazione == true) {
+        print1("Operation interrupted");
+        terminaOperazione = false;
+        clearInterval(iv);
+        reject("Operazione interrotta");
+        return;
+      }
+
+      //Verifica interruzione Greedy
+      if (opzioneGreedy == true && j > 0) {
+        var contatoreZeri = 0;
+        for (var i = 0; i < arrayDiCombinazioni.length; i++) {
+          if (arrayDiCombinazioni[i] == 0) {
+            contatoreZeri = contatoreZeri + 1;
+          }
+        }
+
+        if (contatoreZeri == arrayDiCombinazioni.length) {
+          statoAvanzamento();
+          operazioniFinali();
+          return;
+        }
+      }
+
+      //Esclusione combinazione iniziale per Marker medesimo con combinazioni successive
+      if (opzioneGreedy == true && j == 0 && array_markerPOISelezionati.length >= 2) {
+        //3
+        j = incrementaArrayGreedy(
+          arrayDiCombinazioni,
+          array_markerPOISelezionati.length,
+          j,
+          numeroDiCombinazioniMassimo
+        );
+      }
+
+      var sommaDeiCostiPerSingolaCombinazione = 0.0;
+
+      //Costo Afferenza ( valutato per ogni singolo MarkerCliente e rispettivo MarkerPOI )
+      for (var i = 0; i < arrayDiCombinazioni.length; i++) {
+        //sommaDeiCostiPerSingolaCombinazione = sommaDeiCostiPerSingolaCombinazione + array_costiAfferenza[ i ][ arrayDiCombinazioni[ i ] ];
+        sommaDeiCostiPerSingolaCombinazione =
+          sommaDeiCostiPerSingolaCombinazione +
+          costoAfferenza(array_markerPOISelezionati[arrayDiCombinazioni[i]], array_markerClienti[i]);
+      }
+
+      var arrayDiCombinazioniConDistintiPOI = Array.from(new Set(arrayDiCombinazioni));
+
+      //CostoAttivazioneManutenzione (valutato per ogni singolo MarkerPOI, non ripetuto nel caso in cui il MarkerPOI sia assegnato a più MarkerClienti )
+      for (var i = 0; i < arrayDiCombinazioniConDistintiPOI.length; i++) {
+        //sommaDeiCostiPerSingolaCombinazione = sommaDeiCostiPerSingolaCombinazione + array_costiAttivazioneManutenzione[ arrayDiCombinazioni[ i ] ];
+        sommaDeiCostiPerSingolaCombinazione =
+          sommaDeiCostiPerSingolaCombinazione +
+          costoAttivazioneManutenzione(array_markerPOISelezionati[arrayDiCombinazioniConDistintiPOI[i]]);
+      }
+
+      if (opzioneGreedy == true) {
+        print3(
+          "\tCombination [MarkerNumber]: " +
+            arrayDiCombinazioni +
+            "\n" +
+            "\tCost combination [Euro]: " +
+            sommaDeiCostiPerSingolaCombinazione.toFixed(2)
+        );
+      }
+
+      if (sommaDeiCostiPerSingolaCombinazione < costoMinimoPerPOI) {
+        costoMinimoPerPOI = parseFloat(sommaDeiCostiPerSingolaCombinazione.toFixed(2), 10);
+        array_costoMinimoPerPOI = JSON.parse(JSON.stringify(arrayDiCombinazioni));
+
+        print3(
+          "\tNew minimum cost detected at iteration " +
+            j +
+            "\n" +
+            "\tMinimum cost [Euro]: " +
+            costoMinimoPerPOI.toFixed(2) +
+            "\n" +
+            "\tMinimum cost combination [MarkerNumber]: " +
+            array_costoMinimoPerPOI
+        );
+      }
+
+      inMappa(array_collegamentiTemporanei, "invisible");
+      array_collegamentiTemporanei = [];
+
+      for (var i = 0; i < arrayDiCombinazioni.length; i++) {
+        array_collegamentiTemporanei.push(
+          ottieniPolilinea(
+            [array_markerPOISelezionati[arrayDiCombinazioni[i]].getLatLng(), array_markerClienti[i].getLatLng()],
+            "orange"
+          )
+        );
+      }
+
+      inMappa(array_collegamentiTemporanei, "visible");
+
+      //Stato avanzamento
+      statoAvanzamento();
+
+      if (j == numeroDiCombinazioniMassimo - 1) {
+        operazioniFinali();
+        return;
+      }
+
+      if (opzioneGreedy == true) {
+        j = incrementaArrayGreedy(
+          arrayDiCombinazioni,
+          array_markerPOISelezionati.length,
+          j,
+          numeroDiCombinazioniMassimo
+        );
+      } else {
+        incrementaArray(arrayDiCombinazioni, array_markerPOISelezionati.length);
+        j++;
+      }
+    }, 0);
+  });
+
+  /*
+	Esempio:
+	var k = 0; 
+	var iv = setInterval( function() { 
+		k = k+1; 
+		output.innerHTML = "" + k;
+		k++; 
+		if( k == 100000 ) 
+			clearInterval( iv );
+	},		
+	1);
+	*/
+}
+
+///////////////////////////////////////////////////////file_calcolaCostoMinimoDuAloc///////////////////////////////////////////////////////
+
+function calcolaCostoMinimoDuAloc(stampaConsole) {
+  //Optional argument
+
+  if (stampaConsole != false) {
+    print3("*** LOWER BOUND VERIFICATION USING DU-ALOC ALGORITHM ***");
+  }
+
+  rimuoviCostoMinimoAlgoritmi(false, false);
+
+  //v clienti, u impianti;
+  /*
+	//
+	array_costiAfferenza = [
+		[ 12, 13, 6, 0, 1 ],
+		[ 8, 4, 9, 1, 2 ], 
+		[ 2, 6, 6, 0, 1 ],
+		[ 3, 5, 2, 10, 8 ], 
+		[ 8, 0, 5, 10, 8 ],
+		[ 2, 0, 3, 4, 1 ]
+	
+	];
+	
+	array_costiAttivazioneManutenzione = [ 4, 3, 1, 4, 7 ]; 
+	
+	array_markerClienti = [ 0, 0, 0, 0, 0, 0 ]; 
+	array_markerPOI = [ 0, 0, 0, 0, 0 ]; 
+	//
+	*/
+
+  if (array_markerClienti.length == 0) {
+    print3("The number of Customer Markers identified on the map is equal to 0; operation terminated.");
+    //stato_calcoloCostoMinimo = false;
+    //terminaOperazione = false;
+    return;
+  }
+
+  if (array_markerPOI.length == 0) {
+    print3("The number of POI Markers identified on the map is equal to 0; operation terminated");
+    //stato_calcoloCostoMinimo = false;
+    //terminaOperazione = false;
+    return;
+  }
+
+  var u;
+  var v;
+  var s;
+
+  var z = (v) => {
+    return Math.min(...array_costiAfferenza[v]);
+  };
+
+  var w = (v, u) => {
+    return Math.max(0, array_valoriIniziali[v] - array_costiAfferenza[v][u]);
+  };
+
+  var array_valoriIniziali = [];
+  for (v = 0; v < array_markerClienti.length; v++) {
+    array_valoriIniziali.push(z(v));
+  }
+
+  var zmax = (s) => {
+    var array_valoriMinimi = [];
+
+    for (u = 0; u < array_markerPOI.length; u++) {
+      var sommatoria = 0;
+      for (v = 0; v < array_markerClienti.length; v++) {
+        if (v == s) {
+          sommatoria = sommatoria + 0;
+        } else {
+          sommatoria = sommatoria + w(v, u);
+        }
+      }
+
+      array_valoriMinimi.push(array_costiAfferenza[s][u] + array_costiAttivazioneManutenzione[u] - sommatoria);
+    }
+
+    return Math.min(...array_valoriMinimi);
+  };
+
+  for (s = 0; s < array_markerClienti.length; s++) {
+    var risZMax = zmax(s);
+    if (risZMax > array_valoriIniziali[s]) {
+      array_valoriIniziali[s] = risZMax;
+    } else {
+      //
+    }
+  }
+
+  //print3("valori aggiornati " + array_valoriIniziali );
+
+  var valoreLowerBound = 0;
+
+  for (s = 0; s < array_markerClienti.length; s++) {
+    valoreLowerBound = valoreLowerBound + array_valoriIniziali[s];
+  }
+
+  if (stampaConsole != false) {
+    print3("Lower Bound identified [Euro]: " + valoreLowerBound.toFixed(2));
+  }
+
+  //Sensitivity Analysis
+  return valoreLowerBound;
+}
+
+///////////////////////////////////////////////////////file_calcolaCostoMinimoGreedy///////////////////////////////////////////////////////
+
+async function calcolaCostoMinimoPerGreedy() {
+  print3("*** GREEDY ALGORITHM ***");
+
+  if (varianteGreedy == "markerAttivi") {
+    print3("*** Greedy Algorithm Variant: POI Markers considered Active ***");
+
+    rimuoviCostoMinimoAlgoritmi(false, false);
+
+    if (array_markerPOI.length == 0) {
+      print3("The number of POI Markers identified on the map is equal to 0; operation terminated.");
+      reject("Operazione interrotta");
+      return;
+    }
+
+    if (array_markerClienti.length == 0) {
+      print3("The number of Customer Markers identified on the map is equal to 0; operation terminated.");
+      reject("Operazione interrotta");
+      return;
+    }
+
+    stato_calcoloCostoMinimo = true;
+
+    var array_markerPOIAttiviSelezionati = [];
+    var array_markerPOIAttiviRimasti = [];
+
+    for (var i = 0; i < array_markerPOI.length; i++) {
+      array_markerPOIAttiviRimasti.push(array_markerPOI[i]);
+    }
+
+    var costoMinimoPerPOIAttiviGreedy = Number.POSITIVE_INFINITY;
+    var array_costoMinimoPerPOIAttiviGreedy = [];
+
+    var iterazione = 1;
+    var ripeti = true;
+
+    var ripetizioneGreedy = () => {
+      return new Promise((resolve, reject) => {
+        //for( var i = 0; i < array_markerPOIAttiviRimasti.length; i++ ) { ... }
+        var i = 0;
+        var iv = setInterval(function() {
+          if (terminaOperazione == true) {
+            print3("Operation interrupted");
+            stato_calcoloCostoMinimo = false;
+            terminaOperazione = false;
+            clearInterval(iv);
+            reject("Operazione interrotta");
+            return;
+          }
+
+          if (array_markerPOIAttiviRimasti[i] == undefined) {
+            //
+          } else {
+            array_markerPOIAttiviSelezionati[ultimoPOIAttivi] = array_markerPOIAttiviRimasti[i];
+
+            var temp = "";
+            for (var cont = 0; cont < array_markerPOIAttiviSelezionati.length; cont++) {
+              temp = temp + array_markerPOIAttiviSelezionati[cont].options.numeroMarkerInserimento + " ";
+            }
+            temp = "Selected Markers [MarkerNumber]: " + temp;
+            print3(temp);
+
+            rimuoviCostoMinimoAlgoritmi(false, false); //true
+
+            //const risposta = await calcolaCostoMinimoPerPOISelezionati( array_markerPOISelezionati ); //aggiornamento costoMinimoPerPOI, array_costoMinimoPerPOI
+
+            //Inizializzazione
+            array_costoMinimoGreedySingolaComb = [];
+            sommaCostiSingolaComb = 0.0;
+
+            array_costiAfferenzaSingolaComb = [];
+            for (var riga = 0; riga < array_markerClienti.length; riga++) {
+              array_costiAfferenzaSingolaComb.push([]);
+            }
+
+            var minimoRiga = null;
+
+            //Costi Afferenza
+            for (var riga = 0; riga < array_markerClienti.length; riga++) {
+              for (var colonna = 0; colonna < array_markerPOIAttiviSelezionati.length; colonna++) {
+                array_costiAfferenzaSingolaComb[riga].push(
+                  array_costiAfferenza[riga][array_markerPOIAttiviSelezionati[colonna].options.numeroMarkerInserimento]
+                );
+              }
+              minimoRiga = Math.min(...array_costiAfferenzaSingolaComb[riga]);
+              print3(
+                "\tSelected Customer Marker [MarkerNumber]: " +
+                  riga +
+                  "\n" +
+                  "\tminimum connection cost among the selected POI Markers [Euro]: " +
+                  minimoRiga.toFixed(2)
+              );
+
+              sommaCostiSingolaComb = sommaCostiSingolaComb + minimoRiga;
+
+              array_costoMinimoGreedySingolaComb.push(array_costiAfferenza[riga].indexOf(minimoRiga)); //Questione indici Marker relativi al numero di inserimento
+            }
+
+            print3("\tExpected minimum cost combination [MarkerNumber]: " + array_costoMinimoGreedySingolaComb);
+
+            array_markerPOIAttiviSingolaComb = ordinaArray(
+              JSON.parse(JSON.stringify(Array.from(new Set(array_costoMinimoGreedySingolaComb))))
+            );
+            for (var colonna = 0; colonna < array_markerPOIAttiviSingolaComb.length; colonna++) {
+              sommaCostiSingolaComb =
+                sommaCostiSingolaComb + array_costiAttivazioneManutenzione[array_markerPOIAttiviSingolaComb[colonna]];
+            }
+
+            print3(
+              "\tTotal cost including membership / connection and activation cost [Euro]: " +
+                sommaCostiSingolaComb.toFixed(2)
+            );
+
+            inMappa(array_collegamentiTemporanei, "invisible");
+            array_collegamentiTemporanei = [];
+
+            for (var pos = 0; pos < array_costoMinimoGreedySingolaComb.length; pos++) {
+              array_collegamentiTemporanei.push(
+                ottieniPolilinea(
+                  [
+                    array_markerPOI[array_costoMinimoGreedySingolaComb[pos]].getLatLng(),
+                    array_markerClienti[pos].getLatLng()
+                  ],
+                  "orange"
+                )
+              );
+            }
+            inMappa(array_collegamentiTemporanei, "visible");
+
+            costoMinimoPerPOI = sommaCostiSingolaComb;
+            array_costoMinimoPerPOI = JSON.parse(JSON.stringify(array_costoMinimoGreedySingolaComb));
+
+            if (costoMinimoPerPOI < costoMinimoPerPOIAttiviRipetizione) {
+              costoMinimoPerPOIAttiviRipetizione = costoMinimoPerPOI;
+              array_costoMinimoPerPOIAttiviRipetizione = JSON.parse(JSON.stringify(array_costoMinimoPerPOI));
+              indiceMarkerAttiviRipetizione = i;
+            }
+          }
+
+          if (i <= array_markerPOIAttiviRimasti.length * 0.01 && array_markerPOIAttiviRimasti.length > 1) {
+            document.getElementById("progressBarCombinazioni").value = "0";
+          } else {
+            document.getElementById("progressBarCombinazioni").value =
+              "" + parseInt(((i + 1.0) / array_markerPOIAttiviRimasti.length) * 100.0, 10);
+          }
+
+          document.getElementById("avanzamento").value =
+            "" + (i + 1.0).toLocaleString("it") + " / " + array_markerPOIAttiviRimasti.length.toLocaleString("it");
+
+          if (i == array_markerPOIAttiviRimasti.length - 1) {
+            clearInterval(iv);
+            resolve("Operazione terminata");
+          }
+
+          i++;
+        }, 0);
+      });
+    };
+
+    while (ripeti == true && iterazione <= array_markerPOIAttiviRimasti.length) {
+      //&& iterazione <= array_markerClienti.length  ) {
+
+      array_markerPOIAttiviSelezionati.push(null);
+      var ultimoPOIAttivi = array_markerPOIAttiviSelezionati.length - 1;
+
+      var costoMinimoPerPOIAttiviRipetizione = Number.POSITIVE_INFINITY;
+      var array_costoMinimoPerPOIAttiviRipetizione;
+      var indiceMarkerAttiviRipetizione;
+
+      ///
+
+      const risposta = await ripetizioneGreedy();
+
+      ///
+
+      if (costoMinimoPerPOIAttiviRipetizione < costoMinimoPerPOIAttiviGreedy) {
+        print3("New minimum cost detected, with consequent cost decrease.");
+        costoMinimoPerPOIAttiviGreedy = costoMinimoPerPOIAttiviRipetizione;
+        array_costoMinimoPerPOIAttiviGreedy = JSON.parse(JSON.stringify(array_costoMinimoPerPOIAttiviRipetizione));
+        array_markerPOIAttiviSelezionati[ultimoPOIAttivi] = array_markerPOI[indiceMarkerAttiviRipetizione];
+        array_markerPOIAttiviRimasti[indiceMarkerAttiviRipetizione] = undefined;
+        ripeti = true;
+      } else {
+        print3("No further cost decreases were detected (absence of new minimum costs).");
+        ripeti = false;
+      }
+
+      print3(
+        "Greedy iteration: " +
+          iterazione +
+          "\n" +
+          "Minimum cost detected by the Greedy algorithm [Euro]: " +
+          costoMinimoPerPOIAttiviGreedy.toFixed(2) +
+          "\n" +
+          "Combination of Markers selected by the Greedy algorithm [MarkerNumber]: " +
+          array_costoMinimoPerPOIAttiviGreedy +
+          "\n"
+      );
+
+      iterazione++;
+    }
+
+    //Assegnazione risultati
+    costoMinimoPerPOI = costoMinimoPerPOIAttiviGreedy;
+    array_costoMinimoPerPOI = JSON.parse(JSON.stringify(array_costoMinimoPerPOIAttiviGreedy));
+    array_markerPOIAttivi = ordinaArray(JSON.parse(JSON.stringify(Array.from(new Set(array_costoMinimoPerPOI)))));
+
+    collegamentiInMappaMarkerPOIClienti();
+
+    //opzioneGreedy = false;
+    stato_calcoloCostoMinimo = false;
+    //return;
+  } else if (varianteGreedy == "combinazioneMarker") {
+    print3("*** Greedy Algorithm Variant: combination of POI Markers ***");
+
+    rimuoviCostoMinimoAlgoritmi(false, true);
+
+    if (array_markerPOI.length == 0) {
+      print3("The number of POI Markers identified on the map is equal to 0; operation terminated.");
+      reject("Operazione interrotta");
+      return;
+    }
+
+    if (array_markerClienti.length == 0) {
+      print3("The number of Customer Markers identified on the map is equal to 0; operation terminated.");
+      reject("Operazione interrotta");
+      return;
+    }
+
+    stato_calcoloCostoMinimo = true;
+    opzioneGreedy = true;
+
+    var array_markerPOISelezionati = [];
+    var array_markerPOIRimasti = [];
+
+    for (var i = 0; i < array_markerPOI.length; i++) {
+      array_markerPOIRimasti.push(array_markerPOI[i]);
+    }
+
+    var costoMinimoPerPOIGreedy = Number.POSITIVE_INFINITY; //Precedente
+    var array_costoMinimoPerPOIGreedy = [];
+
+    var iterazione = 1;
+    var ripeti = true;
+
+    while (ripeti == true && iterazione <= array_markerClienti.length) {
+      array_markerPOISelezionati.push(null);
+      var ultimoPOI = array_markerPOISelezionati.length - 1;
+
+      var costoMinimoPerPOIRipetizione = Number.POSITIVE_INFINITY;
+      var array_costoMinimoPerPOIRipetizione;
+      var indiceMarkerRipetizione;
+
+      for (var i = 0; i < array_markerPOIRimasti.length; i++) {
+        if (array_markerPOIRimasti[i] == undefined) {
+          //
+        } else {
+          array_markerPOISelezionati[ultimoPOI] = array_markerPOIRimasti[i];
+
+          var temp = "";
+          for (var cont = 0; cont < array_markerPOISelezionati.length; cont++) {
+            temp = temp + array_markerPOISelezionati[cont].options.numeroMarkerInserimento + " ";
+          }
+          temp = "Selected Markers [MarkerNumber]: " + temp;
+          print3(temp);
+
+          rimuoviCostoMinimoAlgoritmi(false, true);
+
+          const risposta = await calcolaCostoMinimoPerPOISelezionati(array_markerPOISelezionati); //aggiornamento costoMinimoPerPOI, array_costoMinimoPerPOI
+
+          if (costoMinimoPerPOI < costoMinimoPerPOIRipetizione) {
+            costoMinimoPerPOIRipetizione = costoMinimoPerPOI;
+            array_costoMinimoPerPOIRipetizione = [];
+            for (var j = 0; j < array_costoMinimoPerPOI.length; j++) {
+              array_costoMinimoPerPOIRipetizione.push(
+                array_markerPOISelezionati[array_costoMinimoPerPOI[j]].options.numeroMarkerInserimento
+              ); //Differenza Numerazione Greedy e Numerazione Inserimento
+            }
+            indiceMarkerRipetizione = i;
+          }
+        }
+      }
+
+      if (costoMinimoPerPOIRipetizione < costoMinimoPerPOIGreedy) {
+        print3("New minimum cost detected, with consequent cost decrease.");
+        costoMinimoPerPOIGreedy = costoMinimoPerPOIRipetizione;
+        array_costoMinimoPerPOIGreedy = JSON.parse(JSON.stringify(array_costoMinimoPerPOIRipetizione));
+        array_markerPOISelezionati[ultimoPOI] = array_markerPOI[indiceMarkerRipetizione];
+        array_markerPOIRimasti[indiceMarkerRipetizione] = undefined;
+        ripeti = true;
+      } else {
+        print3("No further cost decreases were detected (absence of new minimum costs).");
+        ripeti = false;
+      }
+
+      print3(
+        "Greedy iteration: " +
+          iterazione +
+          "\n" +
+          "Minimum cost detected by the Greedy algorithm [Euro]: " +
+          costoMinimoPerPOIGreedy.toFixed(2) +
+          "\n" +
+          "Combination of Markers selected by the Greedy algorithm [MarkerNumber]: " +
+          array_costoMinimoPerPOIGreedy +
+          "\n"
+      );
+
+      iterazione++;
+    }
+
+    //Assegnazione risultati
+    costoMinimoPerPOI = costoMinimoPerPOIGreedy;
+    array_costoMinimoPerPOI = JSON.parse(JSON.stringify(array_costoMinimoPerPOIGreedy));
+    array_markerPOIAttivi = ordinaArray(JSON.parse(JSON.stringify(Array.from(new Set(array_costoMinimoPerPOI)))));
+
+    collegamentiInMappaMarkerPOIClienti();
+
+    opzioneGreedy = false;
+    stato_calcoloCostoMinimo = false;
+  } else {
+    print3("Choose one of the possible options of the algorithm; operation terminated.");
+  }
+}
+
+///////////////////////////////////////////////////////file_calcolaCostoMinimoPerCombinazioniMarkerPOIAttivi///////////////////////////////////////////////////////
+
+function calcolaCostoMinimoPerCombinazioniMarkerPOIAttivi() {
+  return new Promise((resolve, reject) => {
+    print3("*** COMBINATION OF ACTIVE / INACTIVE POI MARKER ***");
+
+    rimuoviCostoMinimoAlgoritmi(false, false);
+
+    /*
+    //
+    array_costiAfferenza = [
+      [ 12, 13, 6, 0, 1 ],
+      [ 8, 4, 9, 1, 2 ], 
+      [ 2, 6, 6, 0, 1 ],
+      [ 3, 5, 2, 10, 8 ], 
+      [ 8, 0, 5, 10, 8 ],
+      [ 2, 0, 3, 4, 1 ]
+  	
+    ];
+  	
+    array_costiAttivazioneManutenzione = [ 4, 3, 1, 4, 7 ]; 
+  	
+    array_markerClienti = [ 0, 0, 0, 0, 0, 0 ]; 
+    array_markerPOI = [ 0, 0, 0, 0, 0 ]; 
+    //
+    */
+
+    stato_calcoloCostoMinimo = true;
+
+    if (array_markerClienti.length == 0) {
+      print3("The number of Customer Markers identified on the map is equal to 0; operation terminated.");
+      stato_calcoloCostoMinimo = false;
+      terminaOperazione = false;
+      return;
+    }
+
+    if (array_markerPOI.length == 0) {
+      print3("The number of POI Markers identified on the map is equal to 0; operation terminated.");
+      stato_calcoloCostoMinimo = false;
+      terminaOperazione = false;
+      return;
+    }
+
+    var maxCombBinarie = Math.pow(2, array_markerPOI.length);
+
+    var arrayComb = [];
+    for (var k = 0; k < array_markerPOI.length; k++) {
+      arrayComb.push(0);
+    }
+
+    incrementaArray(arrayComb, 2); //Escludo la prima combinazione (nessun impianto attivo)
+
+    var costoMinimoBinario = Number.POSITIVE_INFINITY;
+    var array_costoMinimoBinario = [];
+    var sommaCostiSingolaComb = 0;
+    var array_costiAfferenzaSingolaComb = [];
+    var minimoRiga = null;
+    var array_costoMinimoBinarioSingolaComb = [];
+
+    var j = 1; //Escludo la prima combinazione (nessun impianto attivo)
+    var iv = setInterval(function() {
+      //for( var i = 1; i < maxCombBinarie - 1; i++ ) {
+
+      if (terminaOperazione == true) {
+        print3("Operation interrupted");
+        stato_calcoloCostoMinimo = false;
+        terminaOperazione = false;
+        clearInterval(iv);
+        reject("Operazione interrotta");
+        return;
+      }
+
+      //Inizializzazione
+      array_costoMinimoBinarioSingolaComb = [];
+
+      sommaCostiSingolaComb = 0;
+
+      array_costiAfferenzaSingolaComb = [];
+      for (var riga = 0; riga < array_markerClienti.length; riga++) {
+        array_costiAfferenzaSingolaComb.push([]);
+      }
+
+      minimoRiga = null;
+
+      //Costi Afferenza
+      for (var riga = 0; riga < array_markerClienti.length; riga++) {
+        for (var colonna = 0; colonna < arrayComb.length; colonna++) {
+          //o array_markerPOI.length
+          if (arrayComb[colonna] == 1) {
+            array_costiAfferenzaSingolaComb[riga].push(array_costiAfferenza[riga][colonna]);
+          } else if (arrayComb[colonna] == 0) {
+            //
+          }
+        }
+        minimoRiga = Math.min(...array_costiAfferenzaSingolaComb[riga]);
+
+        sommaCostiSingolaComb = sommaCostiSingolaComb + minimoRiga;
+
+        array_costoMinimoBinarioSingolaComb.push(array_costiAfferenza[riga].indexOf(minimoRiga));
+      }
+
+      //Costi attivazione e manutenzione
+      for (var colonna = 0; colonna < arrayComb.length; colonna++) {
+        if (arrayComb[colonna] == 1) {
+          sommaCostiSingolaComb = sommaCostiSingolaComb + array_costiAttivazioneManutenzione[colonna];
+        }
+      }
+
+      if (sommaCostiSingolaComb < costoMinimoBinario) {
+        costoMinimoBinario = sommaCostiSingolaComb;
+        array_costoMinimoBinario = JSON.parse(JSON.stringify(array_costoMinimoBinarioSingolaComb));
+      }
+
+      inMappa(array_collegamentiTemporanei, "invisible");
+      array_collegamentiTemporanei = [];
+
+      for (var i = 0; i < array_costoMinimoBinarioSingolaComb.length; i++) {
+        array_collegamentiTemporanei.push(
+          ottieniPolilinea(
+            [array_markerPOI[array_costoMinimoBinarioSingolaComb[i]].getLatLng(), array_markerClienti[i].getLatLng()],
+            "orange"
+          )
+        );
+      }
+
+      inMappa(array_collegamentiTemporanei, "visible");
+
+      if (j == maxCombBinarie - 1) {
+        array_markerPOIAttivi = ordinaArray(JSON.parse(JSON.stringify(Array.from(new Set(array_costoMinimoBinario)))));
+
+        array_costoMinimoPerPOI = array_costoMinimoBinario;
+
+        collegamentiInMappaMarkerPOIClienti();
+
+        print3(
+          "Maximum number of binary combinations: " +
+            maxCombBinarie +
+            "\n" +
+            "Minimum cost [Euro]: " +
+            costoMinimoBinario.toFixed(2) +
+            "\n" +
+            "Minimum cost combination [MarkerNumber]: " +
+            array_costoMinimoBinario
+        );
+
+        stato_calcoloCostoMinimo = false;
+        terminaOperazione = false;
+        clearInterval(iv);
+        resolve("Operazione terminata");
+        //return;
+      }
+
+      if (j <= maxCombBinarie * 0.01 && maxCombBinarie > 1) {
+        document.getElementById("progressBarCombinazioni").value = "0";
+      } else {
+        document.getElementById("progressBarCombinazioni").value =
+          "" + parseInt(((j + 1.0) / maxCombBinarie) * 100.0, 10);
+      }
+
+      document.getElementById("avanzamento").value =
+        "" + (j + 1.0).toLocaleString("it") + " / " + maxCombBinarie.toLocaleString("it");
+
+      incrementaArray(arrayComb, 2);
+      j++;
+    }, 0);
+  });
+}
+
+///////////////////////////////////////////////////////file_calcolaCostoMinimoSimplePlantLocation///////////////////////////////////////////////////////
+
+function calcolaCostoMinimoSimplePlantLocation(stampaConsole) {
+  return new Promise((resolve, reject) => {
+    if (stampaConsole != false) {
+      print3("*** SIMPLE PLANT LOCATION ALGORITHM ***");
+    }
+
+    rimuoviCostoMinimoAlgoritmi(false, false);
+
+    /*
+    //
+    array_costiAfferenza = [
+      [ 0, 5, 7, 3, 4, 9  ],
+      [ 5, 0, 10, 6, 8, 5 ], 
+      [ 7, 10, 0, 4, 7, 8 ],
+      [ 3, 6, 4, 0, 2, 9 ], 
+      [ 4, 8, 7, 2, 0, 6 ],
+      [ 9, 5, 8, 9, 6, 0 ]
+  	
+    ];
+  	
+    array_costiAttivazioneManutenzione = [ 7, 3, 8, 5, 10, 6 ]; 
+  	
+    array_markerClienti = [ 0, 0, 0, 0, 0, 0 ]; 
+    array_markerPOI = [ 0, 0, 0, 0, 0, 0 ]; 
+    //
+    */
+
+    /*
+    //
+    array_costiAfferenza = [
+      [ 16750, 14600, 19250, 3800, 9220  ],
+      [ 3200, 15520, 19200, 10840, 13168 ], 
+      [ 8220, 11640, 17100, 6516, 8400 ],
+      [ 9780, 600, 3000, 6270, 3048 ], 
+      [ 8120, 3465, 6650, 4655, 2177 ],
+      [ 30800, 13200, 8800, 25531, 19767 ]
+  	
+    ];
+  	
+    array_costiAttivazioneManutenzione = [ 17000, 13500, 15000, 14000, 12000 ]; 
+  	
+    array_markerClienti = [ 0, 0, 0, 0, 0, 0 ]; 
+    array_markerPOI = [ 0, 0, 0, 0, 0 ]; 
+    //
+    */
+
+    stato_calcoloCostoMinimo = true;
+
+    if (array_markerClienti.length == 0) {
+      print3("The number of Customer Markers identified on the map is equal to 0; operation terminated.");
+      stato_calcoloCostoMinimo = false;
+      terminaOperazione = false;
+      return;
+    }
+
+    if (array_markerPOI.length == 0) {
+      print3("The number of POI Markers identified on the map is equal to 0; operation terminated.");
+      stato_calcoloCostoMinimo = false;
+      terminaOperazione = false;
+      return;
+    }
+
+    var maxIterazioni = array_markerPOI.length;
+
+    var i;
+    var j;
+    var k;
+
+    var array_soluzioniPOI = [];
+    var array_soluzioniPOIRimanenti = new Array(array_markerPOI.length);
+    var contaPOIRimanentiUndefined = 0;
+    var array_w = new Array(array_markerPOI.length);
+    //var array_I = new Array( array_markerPOI.length );
+    var array_savings = new Array(array_markerPOI.length);
+    var contaSavingsNegativi = 0;
+    var soluzioneTemporanea = null;
+    var costoMinimo = null;
+    var ripeti = true;
+    var iterazione = 0;
+
+    var w = (j) => {
+      var res = array_costiAttivazioneManutenzione[j];
+      for (i = 0; i < array_markerClienti.length; i++) {
+        res = res + array_costiAfferenza[i][j];
+      }
+      return res;
+    };
+
+    var savings = (j) => {
+      var res = 0;
+      var array_minCostiAfferenzaK = [];
+      var minCostiAfferenzaK = null;
+      for (i = 0; i < array_markerClienti.length; i++) {
+        array_minCostiAfferenzaK = [];
+        for (indiceK = 0; indiceK < array_soluzioniPOI.length; indiceK++) {
+          array_minCostiAfferenzaK.push(array_costiAfferenza[i][array_soluzioniPOI[indiceK]]);
+        }
+
+        minCostiAfferenzaK = Math.min(...array_minCostiAfferenzaK);
+        res = res + Math.max(minCostiAfferenzaK - array_costiAfferenza[i][j], 0);
+      }
+      return res - array_costiAttivazioneManutenzione[j];
+    };
+
+    //inizializzazione
+
+    for (j = 0; j < array_markerPOI.length; j++) {
+      array_soluzioniPOIRimanenti[j] = j;
+    }
+
+    for (j = 0; j < array_markerPOI.length; j++) {
+      array_w[j] = w(j);
+    }
+    costoMinimo = Math.min(...array_w);
+    soluzioneTemporanea = array_w.indexOf(costoMinimo);
+    array_soluzioniPOI.push(soluzioneTemporanea);
+    array_soluzioniPOIRimanenti[soluzioneTemporanea] = "Not_defined"; //Non_definito //undefined
+
+    if (stampaConsole != false) {
+      print3(
+        "Initialization of the Algorithm: " +
+          "\n" +
+          "Array_w containing the total costs (membership / connecting and activation) initially evaluated [Euro]: " +
+          array_w.map(function(num) {
+            return " " + num.toFixed(2);
+          }) +
+          "\n" +
+          "Minimum cost initially identified [Euro]: " +
+          costoMinimo.toFixed(2) +
+          "\n" +
+          "POI Marker part of the initial solution [MarkerNumber]: " +
+          array_soluzioniPOI +
+          "\n" +
+          "Remaining POI Markers [MarkerNumber]: " +
+          array_soluzioniPOIRimanenti
+      );
+    }
+
+    //Calcolo dei Savings con arresto
+
+    var aggiornamentoProgressBar = () => {
+      if (contaSavingsNegativi <= maxIterazioni * 0.01) {
+        if (stampaConsole != false) {
+          document.getElementById("progressBarCombinazioni").value = "0";
+        }
+      } else {
+        if (stampaConsole != false) {
+          document.getElementById("progressBarCombinazioni").value =
+            "" + parseInt((contaSavingsNegativi / maxIterazioni) * 100.0, 10);
+        }
+      }
+      if (stampaConsole != false) {
+        document.getElementById("avanzamento").value =
+          "" + contaSavingsNegativi.toLocaleString("it") + " / " + maxIterazioni.toLocaleString("it");
+      }
+    };
+
+    var operazioniFinali = () => {
+      if (stampaConsole != false) {
+        print3(
+          "Final results obtained: " +
+          "\n" +
+          "Minimum cost identified [Euro]: " +
+          costoMinimo.toFixed(2) +
+          "\n" + //Soluzione1
+            "Set of POI Markers forming part of the solution also defined as active POI Markers [MarkerNumber]: " +
+            array_soluzioniPOI +
+            "\n" +
+            "Set of POI Markers not part of the solution [MarkerNumber]: " +
+            array_soluzioniPOIRimanenti
+        );
+      }
+
+      array_markerPOIAttivi = ordinaArray(JSON.parse(JSON.stringify(Array.from(new Set(array_soluzioniPOI)))));
+
+      ricercaCollegamentiConCostoMinimoPOIAttivi(); //array_costoMinimoPerPOI, costoMinimoPerPOI //Soluzione2
+
+      if (stampaConsole != false) {
+        collegamentiInMappaMarkerPOIClienti();
+      }
+
+      stato_calcoloCostoMinimo = false;
+      terminaOperazione = false;
+
+      if (stampaConsole != false) {
+        print3(
+          "SOLUTION N.1 of minimum cost calculated through Savings [Euro]: " +
+            costoMinimo.toFixed(2) +
+            "\n" +
+            "SOLUTION N.2 of minimum cost calculated through the solution envisaged for the systems considered active, evaluating the membership / connection and activation costs [Euro]: " +
+            costoMinimoPerPOI.toFixed(2)
+        );
+      }
+
+      clearInterval(iv);
+      resolve("Operazione terminata");
+      //return;
+    };
+
+    //while( ripeti == true ) {
+
+    var iv = setInterval(function() {
+      if (ripeti == true) {
+        if (terminaOperazione == true) {
+          print3("Operation interrupted");
+          stato_calcoloCostoMinimo = false;
+          terminaOperazione = false;
+          clearInterval(iv);
+          reject("Operazione interrotta");
+          return;
+        }
+
+        contaPOIRimanentiUndefined = 0;
+
+        for (j = 0; j < array_soluzioniPOIRimanenti.length; j++) {
+          if (array_soluzioniPOIRimanenti[j] == "Not_defined") {
+            //Non_definito //undefined
+            contaPOIRimanentiUndefined = contaPOIRimanentiUndefined + 1;
+          }
+        }
+
+        if (contaPOIRimanentiUndefined == array_soluzioniPOIRimanenti.length) {
+          ripeti = false;
+          if (stampaConsole != false) {
+            print3("No Markers detected in the set of remaining POI Markers.");
+          }
+          //clearInterval( iv );
+          operazioniFinali();
+        }
+
+        contaSavingsNegativi = 0;
+
+        for (j = 0; j < array_soluzioniPOIRimanenti.length; j++) {
+          if (array_soluzioniPOIRimanenti[j] == "Not_defined") {
+            //Non_definito //undefined
+            array_savings[j] = Number.NEGATIVE_INFINITY;
+          } else {
+            array_savings[j] = savings(j);
+          }
+
+          if (array_savings[j] < 0.0) {
+            contaSavingsNegativi = contaSavingsNegativi + 1;
+          }
+        }
+        //print3( "array_savings " + printVettoreColonna( array_savings ) );
+
+        aggiornamentoProgressBar();
+
+        if (contaSavingsNegativi == array_soluzioniPOIRimanenti.length) {
+          ripeti = false;
+          if (stampaConsole != false) {
+            print3(
+              "The remaining Savings all take on a negative value." +
+                "\n" +
+                "Savings remaining [Euro]: " +
+                array_savings.map(function(num) {
+                  return " " + num.toFixed(2);
+                })
+            );
+          }
+
+          operazioniFinali();
+        } else {
+          costoMinimo = costoMinimo - Math.max(...array_savings);
+          soluzioneTemporanea = array_savings.indexOf(Math.max(...array_savings));
+          array_soluzioniPOI.push(soluzioneTemporanea);
+          array_soluzioniPOIRimanenti[soluzioneTemporanea] = "Not_defined"; //Non_definito
+
+          ripeti = true;
+        }
+
+        iterazione = iterazione + 1;
+      }
+    }, 0);
+  });
+}
+
+///////////////////////////////////////////////////////file_cercaPercorsoOSRMSullaMappa///////////////////////////////////////////////////////
+
+async function cercaPercorsoOSRMSullaMappa(lat1, lng1, lat2, lng2) {
+  //OSRM longitude, latitude, longitude, latitude ...
+
+  const api = await fetch(
+    "https://router.project-osrm.org/route/v1/" +
+      profileOSRM +
+      "/" +
+      lng1 +
+      "," +
+      lat1 +
+      ";" +
+      lng2 +
+      "," +
+      lat2 +
+      "?steps=false&overview=simplified&geometries=geojson",
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      } //,
+      //body:""
+    }
+  );
+
+  const risposta = await api.json();
+  //const answer = api;
+  //console.log(risposta);
+
+  print4(
+    "OSRM Request: http://router.project-osrm.org/route/v1/" +
+      profileOSRM +
+      "/" +
+      lng1 +
+      "," +
+      lat1 +
+      ";" +
+      lng2 +
+      "," +
+      lat2 +
+      "?steps=false&overview=simplified&geometries=geojson"
+  );
+
+  print4("\tMeans of locomotion/Profile OSRM: " + profileOSRM);
+  print4("\tInitial charge level [%]: " + livelloCarica);
+  print4("\tKm range / autonomy generally expected for the vehicle [Km]: " + autonomiaMacchina.toFixed(3));
+  autonomiaPrevista = (autonomiaMacchina * livelloCarica) / 100.0;
+  print4("\tExpected initial Km range / autonomy [Km]: " + autonomiaPrevista.toFixed(3));
+
+  distanzaTotalePercorsa = 0.0;
+
+  var geometria = risposta["routes"][0]["geometry"]["coordinates"];
+  if (geometria.length > 0) {
+    for (var i = 0; i < geometria.length; i++) {
+      var latPunto = geometria[i][1];
+      var lngPunto = geometria[i][0];
+      array_puntiDelPercorso.push([lngPunto, latPunto]);
+
+      if (i >= 1) {
+        distanzaTotalePercorsa =
+          distanzaTotalePercorsa +
+          ottieniDistanza(
+            L.latLng(array_puntiDelPercorso[i][1], array_puntiDelPercorso[i][0]),
+            L.latLng(array_puntiDelPercorso[i - 1][1], array_puntiDelPercorso[i - 1][0])
+          );
+      }
+    }
+
+    print4("\tTotal distance of the route [Km]: " + distanzaTotalePercorsa.toFixed(3));
+
+    //console.log( array_puntiDelPercorso.length );
+
+    var trattoUltimo = 0;
+    var trattoSeguente = 0;
+    var verificaDistanze = 0;
+    var distanzaPercorsa = 0;
+    var distanzaAllaRicarica = 0;
+    var MarkerAllaRicarica = null;
+    //autonomiaPrevista
+
+    for (var i = 0; i < array_puntiDelPercorso.length; i++) {
+      if (i >= 1) {
+        trattoUltimo = ottieniDistanza(
+          L.latLng(array_puntiDelPercorso[i][1], array_puntiDelPercorso[i][0]),
+          L.latLng(array_puntiDelPercorso[i - 1][1], array_puntiDelPercorso[i - 1][0])
+        );
+      }
+      distanzaPercorsa = distanzaPercorsa + trattoUltimo;
+      distanzaAllaRicarica = autonomiaPrevista - distanzaPercorsa;
+
+      if (i < array_puntiDelPercorso.length - 1) {
+        trattoSeguente = ottieniDistanza(
+          L.latLng(array_puntiDelPercorso[i + 1][1], array_puntiDelPercorso[i + 1][0]),
+          L.latLng(array_puntiDelPercorso[i][1], array_puntiDelPercorso[i][0])
+        );
+
+        verificaDistanze = distanzaAllaRicarica - trattoSeguente;
+
+        if (verificaDistanze < 0.0) {
+          var latMarker = array_puntiDelPercorso[i][1];
+          var lngMarker = array_puntiDelPercorso[i][0];
+          MarkerAllaRicarica = ottieniMarker([latMarker, lngMarker], null, "red");
+          MarkerAllaRicarica.getPopup().setContent(
+            "Coordinates: " +
+              latMarker.toFixed(6) +
+              ", " +
+              lngMarker.toFixed(6) +
+              "<br>" +
+              "Distance traveled since start or last charge [Km]: " +
+              distanzaPercorsa.toFixed(3) +
+              "<br>" +
+              "Charging needed in [Km]: " +
+              distanzaAllaRicarica.toFixed(3)
+          );
+          array_markerAllaRicarica.push(MarkerAllaRicarica);
+          inMappa(array_markerAllaRicarica, "visible");
+
+          var trattoUltimo = 0;
+          var trattoSeguente = 0;
+          var verificaDistanze = 0;
+          var distanzaPercorsa = 0;
+          var distanzaAllaRicarica = 0;
+          var MarkerAllaRicarica = null;
+          autonomiaPrevista = autonomiaMacchina;
+        }
+      }
+    }
+
+    lineString_trovaPercorsoSullaMappa = new Turf(turf.lineString(array_puntiDelPercorso), "blue");
+    inMappa([lineString_trovaPercorsoSullaMappa.geoJSON], "visible");
+
+    variazioneTurfIntersezioni();
+  }
+}
+
+///////////////////////////////////////////////////////file_elaboraFlussiPendolarismo///////////////////////////////////////////////////////
+
+function elaboraFlussiPendolarismo(text) {
+  document.getElementById("input_file").value = "";
+
+  var datiCSV = [];
+  var datiSSL = [];
+
+  var righe = text.split("\n");
+
+  //Posizione 0 - Intestazione
+
+  for (i = 1; i < righe.length; i++) {
+    var temp = righe[i].split(";");
+    if (temp.length == 1) {
+      //
+    } else {
+      datiCSV.push(righe[i].split(";"));
+    }
+  }
+
+  for (var i = 0; i < datiCSV.length; i++) {
+    datiSSL.push({
+      origineNome: datiCSV[i][2],
+      destinazioneNome: datiCSV[i][4],
+      origineCoord: new L.latLng(parseFloat(datiCSV[i][16], 10), parseFloat(datiCSV[i][15], 10)), //Coord SSL Origine
+      destinazioneCoord: new L.latLng(parseFloat(datiCSV[i][18], 10), parseFloat(datiCSV[i][17], 10)), //Coord SSL Destinazione
+      flusso: parseInt(datiCSV[i][6], 10) //Flussi totali
+    });
+  }
+
+  var areaDiRicerca = turf.polygon([
+    [
+      [
+        parseFloat(mappa.getBounds().getNorthWest().lng - 0.07, 10),
+        parseFloat(mappa.getBounds().getNorthWest().lat + 0.07, 10)
+      ],
+      [
+        parseFloat(mappa.getBounds().getNorthEast().lng + 0.07, 10),
+        parseFloat(mappa.getBounds().getNorthEast().lat + 0.07, 10)
+      ],
+      [
+        parseFloat(mappa.getBounds().getSouthEast().lng + 0.07, 10),
+        parseFloat(mappa.getBounds().getSouthEast().lat - 0.07, 10)
+      ],
+      [
+        parseFloat(mappa.getBounds().getSouthWest().lng - 0.07, 10),
+        parseFloat(mappa.getBounds().getSouthWest().lat - 0.07, 10)
+      ],
+      [
+        parseFloat(mappa.getBounds().getNorthWest().lng - 0.07, 10),
+        parseFloat(mappa.getBounds().getNorthWest().lat + 0.07, 10)
+      ]
+    ]
+  ]);
+
+  //var poligono = new Turf( areaDiRicerca, "orange" );
+  //inMappa( [ poligono.geoJSON ] , "visible" );
+
+  for (var i = 0; i < datiSSL.length; i++) {
+    var origine = turf.point([
+      parseFloat(datiSSL[i]["origineCoord"].lng, 10),
+      parseFloat(datiSSL[i]["origineCoord"].lat, 10)
+    ]);
+    var destinazione = turf.point([
+      parseFloat(datiSSL[i]["destinazioneCoord"].lng, 10),
+      parseFloat(datiSSL[i]["destinazioneCoord"].lat, 10)
+    ]);
+
+    if (
+      turf.booleanPointInPolygon(origine, areaDiRicerca) == true ||
+      turf.booleanPointInPolygon(destinazione, areaDiRicerca) == true
+    ) {
+      /*
+      if( 
+        ( latOrigine >= latSWmod && latOrigine <= latNEmod ) && ( lngOrigine >= lngSWmod && lngOrigine <= lngNEmod ) ||
+        ( latDestinazione >= latSWmod && latDestinazione <= latNEmod ) && ( lngDestinazione >= lngSWmod && lngDestinazione <= lngNEmod )
+      ) {
+      */
+
+      array_collegamentiFlussi.push(
+        ottieniPolilinea([datiSSL[i]["origineCoord"], datiSSL[i]["destinazioneCoord"]], "blue")
+      );
+
+      print2(
+        "Flow " +
+          datiSSL[i]["origineNome"] +
+          " - " +
+          datiSSL[i]["destinazioneNome"] +
+          " with a number of " +
+          datiSSL[i]["flusso"] +
+          " people/person added to map."
+      );
+
+      for (var j = 0; j < array_markerPOI.length; j++) {
+        var pt = turf.point([array_markerPOI[j].getLatLng().lng, array_markerPOI[j].getLatLng().lat]);
+        var line = turf.lineString([
+          [datiSSL[i]["origineCoord"].lng, datiSSL[i]["origineCoord"].lat],
+          [datiSSL[i]["destinazioneCoord"].lng, datiSSL[i]["destinazioneCoord"].lat]
+        ]);
+
+        var distanza = turf.pointToLineDistance(pt, line);
+
+        if (distanza < 6.0) {
+          array_markerPOI[j].options.sommatoriaFlussi =
+            array_markerPOI[j].options.sommatoriaFlussi + parseFloat(datiSSL[i]["flusso"], 10);
+          array_markerPOI[j].options.fattorePendolarismo = parseFloat(
+            (1 + array_markerPOI[j].options.sommatoriaFlussi / 1000.0).toFixed(6),
+            10
+          );
+          aggiornaPopupSingoloMarker(array_markerPOI[j]);
+        }
+      }
+    }
+  }
+
+  if (array_collegamentiFlussi.length == 0) {
+    print2("No pendularity flow detected on map.");
+  } else {
+    calcolaMatriciDiCosti();
+    inMappa(array_collegamentiFlussi, "visible");
+    mostraVariabili(); 
+  }
+}
+
+///////////////////////////////////////////////////////file_elaboraMatriceAHP///////////////////////////////////////////////////////
+
+function elaboraMatriceAHP() {
+  criteriPV = [];
+
+  var n = parseFloat(array_punteggioAHP.length, 10); //4.0
+
+  var array_RI = [0.0, 0.0, 0.58, 0.9, 1.12, 1.24, 1.32, 1.41, 1.45, 1.49, 1.51, 1.48, 1.56, 1.57, 1.59];
+
+  for (var riga = 0; riga < array_punteggioAHP.length; riga++) {
+    for (var colonna = 0; colonna < array_punteggioAHP[riga].length; colonna++) {
+      if (isNaN(array_punteggioAHP[riga][colonna])) {
+        print2("Comparison Matrix not completely filled out; operation terminated.");
+        return;
+      }
+    }
+  }
+
+  print2("Comparison Matrix: ");
+  var valoriMatrice = "";
+  for (var riga = 0; riga < array_punteggioAHP.length; riga++) {
+    for (var colonna = 0; colonna < array_punteggioAHP[riga].length; colonna++) {
+      valoriMatrice = valoriMatrice + array_punteggioAHP[riga][colonna].toFixed(6) + "\t";
+    }
+    valoriMatrice = valoriMatrice + "\n";
+  }
+
+  print2(valoriMatrice);
+
+  var Ti = [];
+  var sommatoriaColonnaTemp = 0.0;
+  for (var colonna = 0; colonna < array_punteggioAHP[0].length; colonna++) {
+    sommatoriaColonnaTemp = 0.0;
+    for (var riga = 0; riga < array_punteggioAHP.length; riga++) {
+      sommatoriaColonnaTemp = sommatoriaColonnaTemp + array_punteggioAHP[riga][colonna];
+    }
+    Ti.push(sommatoriaColonnaTemp);
+  }
+  print2("Ti Array (column sums): " + Ti);
+
+  var Xi = [];
+  var sommatoriaRiga = 0.0;
+  var prodottoRiga = 1.0;
+  var sommatoriaColonnaXi = 0.0;
+
+  if (tipologiaMediaMatriceAHP == "aritmetica") {
+    for (var riga = 0; riga < array_punteggioAHP.length; riga++) {
+      sommatoriaRiga = 0.0;
+      for (var colonna = 0; colonna < array_punteggioAHP[riga].length; colonna++) {
+        sommatoriaRiga = sommatoriaRiga + array_punteggioAHP[riga][colonna];
+      }
+      Xi.push(sommatoriaRiga / n);
+      sommatoriaColonnaXi = sommatoriaColonnaXi + Xi[riga];
+    }
+  } else if (tipologiaMediaMatriceAHP == "geometrica") {
+    for (var riga = 0; riga < array_punteggioAHP.length; riga++) {
+      prodottoRiga = 1.0;
+      for (var colonna = 0; colonna < array_punteggioAHP[riga].length; colonna++) {
+        prodottoRiga = prodottoRiga * array_punteggioAHP[riga][colonna];
+      }
+      Xi.push(Math.pow(prodottoRiga, 1.0 / n));
+      sommatoriaColonnaXi = sommatoriaColonnaXi + Xi[riga];
+    }
+  }
+  print2(
+    "Xi Array (arithmetic / geometric mean relating to the product obtained from the values contained in each single row): " +
+      Xi
+  );
+
+  //Array criteriPV o Pi
+  for (var riga = 0; riga < array_punteggioAHP.length; riga++) {
+    //for( var colonna = 0; colonna < array_punteggioAHP[ riga ].length; colonna++ ) {
+    //
+    //}
+    criteriPV.push(Xi[riga] / sommatoriaColonnaXi);
+  }
+  print2("Pi Array or Priority Vector of the criteria (weights assumed by each criterion): " + criteriPV);
+
+  //Verifica autovalore principale
+  var Yi = [];
+  for (var riga = 0; riga < array_punteggioAHP.length; riga++) {
+    //for( var colonna = 0; colonna < array_punteggioAHP[ riga ].length; colonna++ ) {
+    //
+    //}
+    //Yi.push( parseFloat( ( Xi[ riga ] / sommatoriaColonnaXi * Ti[ riga ] ), 10  ) ); //Matrice quadrata riga = colonna
+    Yi.push(parseFloat(criteriPV[riga] * Ti[riga], 10)); //Matrice quadrata riga = colonna
+  }
+  print2("Yi Array (components of the principal eigenvalue): " + Yi);
+
+  var autovalorePrincipale = 0.0;
+  for (var riga = 0; riga < array_punteggioAHP.length; riga++) {
+    //for( var colonna = 0; colonna < array_punteggioAHP[ riga ].length; colonna++ ) {
+    //
+    //}
+    autovalorePrincipale = autovalorePrincipale + Yi[riga];
+  }
+
+  print2("Principal / Maximum eigenvalue (Lambda): " + autovalorePrincipale.toFixed(6));
+
+  var differenza = autovalorePrincipale - n;
+  if (Math.abs(differenza) > 0.0 && Math.abs(differenza) < 0.0000009999) {
+    print2("Principal_eigenvalue - n = " + differenza + " (without approximations)");
+    differenza = 0.0;
+  } else {
+    //
+  }
+
+  var CI = differenza / (n - 1);
+  print2("CI or Consistency Index : " + CI.toFixed(6));
+
+  var RI = array_RI[n - 1];
+  print2("RI or Random Index: " + RI.toFixed(6));
+
+  CR = CI / RI;
+  print2("CR or Consistency Ratio: " + CR.toFixed(6));
+
+  if (CR <= 0.1) {
+    print2("CR index included within the CR threshold value considered equal to 0.1");
+    print2(
+      "Dist Weight: " +
+        criteriPV[0].toFixed(6) +
+        "\n" +
+        "Catt Weight: " +
+        criteriPV[1].toFixed(6) +
+        "\n" +
+        "Ctot Weight: " +
+        criteriPV[2].toFixed(6) +
+        "\n" +
+        "ImpIct Weight: " +
+        criteriPV[3].toFixed(6)
+    );
+  } else {
+    print2("CR index higher than the limit threshold of 0.1.");
+  }
+}
+
+///////////////////////////////////////////////////////file_metodologiaAHP///////////////////////////////////////////////////////
+
+function risultatiCalcolaMetodologiaAHP() {
+  var select_risultatiMarkerClienteAHP = document.getElementById("select_risultatiMarkerClienteAHP");
+
+  if (select_risultatiMarkerClienteAHP.selectedIndex >= 1) {
+    var riga = select_risultatiMarkerClienteAHP.options[select_risultatiMarkerClienteAHP.selectedIndex].value;
+
+    if (array_datiAHP.length == 0) {
+      print3("Process data using AHP Methodology; operation interrupted.");
+      return;
+    }
+
+    if (array_datiAHP[riga]["numPOI"].length == 0) {
+      print3("Customer Marker " + riga + " without associated POI Markers, not present within the considered radius.");
+    } else {
+      print3(
+        "Results obtained on the Customer Marker " +
+          riga +
+          ":" +
+          "\n" +
+          "Number of Customer Marker: " +
+          array_datiAHP[riga]["numCliente"] +
+          "\n" +
+          "Number of POI Markers associated within the considered radius: \n" +
+          printVettoreColonna(array_datiAHP[riga]["numPOI"]) +
+          "\n" +
+          "Distance expected from each POI Marker: \n" +
+          printVettoreColonna(array_datiAHP[riga]["Dist"]) +
+          "\n" +
+          "Priority Vector (Distance): \n" +
+          printVettoreColonna(array_datiAHP[riga]["DistPV"]) +
+          "\n" +
+          "Priority Vector normalized (Distance): \n" +
+          printVettoreColonna(array_datiAHP[riga]["DistPVNorm"]) +
+          "\n" +
+          "Activation/Maintenance Cost expected from each POI Marker: \n" +
+          printVettoreColonna(array_datiAHP[riga]["Catt"]) +
+          "\n" +
+          "Priority Vector (Activation/Maintenance Cost): \n" +
+          printVettoreColonna(array_datiAHP[riga]["CattPV"]) +
+          "\n" +
+          "Priority Vector normalized (Activation/Maintenance Cost): \n" +
+          printVettoreColonna(array_datiAHP[riga]["CattPVNorm"]) +
+          "\n" +
+          "Total Cost (Afferent and Activation) expected from each POI Marker: \n" +
+          printVettoreColonna(array_datiAHP[riga]["Ctot"]) +
+          "\n" +
+          "Priority Vector (Total Cost): \n" +
+          printVettoreColonna(array_datiAHP[riga]["CtotPV"]) +
+          "\n" +
+          "Priority Vector normalized (Total Cost): \n" +
+          printVettoreColonna(array_datiAHP[riga]["CtotPVNorm"]) +
+          "\n" +
+          "Plant Factor expected from each POI Marker: \n" +
+          printVettoreColonna(array_datiAHP[riga]["FattImp"]) +
+          "\n" +
+          "Priority Vector (Plant Factor): \n" +
+          printVettoreColonna(array_datiAHP[riga]["FattImpPV"]) +
+          "\n" +
+          "Priority Vector normalized (Plant Factor): \n" +
+          printVettoreColonna(array_datiAHP[riga]["FattImpPVNorm"]) +
+          "\n" +
+          "Matrix containing Priority Vector of Alternatives: \n" +
+          printMatrice2D(array_datiAHP[riga]["AltPVNorm"]) +
+          "\n" +
+          "Product of Priority Vector Matrixs relative to the Alternatives and the Criteria: \n" +
+          printVettoreColonna(array_datiAHP[riga]["RisPV"]) +
+          "\n" +
+          "Alternative or POI Marker selected: \n" +
+          array_datiAHP[riga]["numPOISelezionato"]
+      );
+    }
+
+    zoom = 16;
+    mappa.setView(
+      [array_markerClienti[riga].options.coordinate[0], array_markerClienti[riga].options.coordinate[1]],
+      zoom
+    );
+  }
+}
+
+function calcolaMetodologiaAHP() {
+  return new Promise((resolve, reject) => {
+    print3("*** AHP METHODOLOGY ***");
+
+    if (CR == undefined) {
+      print3("CR index not defined; operation interrupted. ");
+      reject("Operazione interrotta");
+      return;
+    }
+
+    if (CR > 0.1) {
+      print3("CR index higher than the limit threshold of 0.1; operation interrupted.");
+      reject("Operazione interrotta");
+      return;
+    }
+
+    if (array_markerPOI.length == 0) {
+      print3("The number of POI Markers identified on the map is equal to 0; operation terminated.");
+      reject("Operazione interrotta");
+      return;
+    }
+
+    if (array_markerClienti.length == 0) {
+      print3("The number of Customer Markers identified on the map is equal to 0; operation terminated.");
+      reject("Operazione interrotta");
+      return;
+    }
+
+    var turfDistanza = document.getElementById("range_variazioneTurfDistanzaMarkerClienti").value / 1000.0;
+    if (turfDistanza == 0.0) {
+      print3("Expected distance from Customer Markers equal to 0.0; operation interrupted.");
+      reject("Operazione interrotta");
+      return;
+    }
+
+    rimuoviCostoMinimoAlgoritmi(false, false);
+
+    var maxDist = undefined;
+    var maxCatt = undefined;
+    var maxCtot = undefined;
+    var maxFattImp = undefined;
+    var sommaDistPV = 0.0;
+    var sommaCattPV = 0.0;
+    var sommaCtotPV = 0.0;
+    var sommaFattImpPV = 0.0;
+
+    var operazioniFinali = () => {
+      array_markerPOIAttivi = ordinaArray(JSON.parse(JSON.stringify(Array.from(new Set(array_costoMinimoPerPOI)))));
+
+      if (array_markerPOIAttivi.indexOf("Not_defined") >= 0) {
+        //Non_definito
+        array_markerPOIAttivi.splice(array_markerPOIAttivi.indexOf("Not_defined"), 1); //Non_definito
+      }
+
+      collegamentiInMappaMarkerPOIClienti();
+
+      print3("Minimum cost combination [MarkerNumber]: " + array_costoMinimoPerPOI);
+
+      var sommaDeiCostiPerCombinazioneFinale = 0.0;
+
+      //Costo Afferenza ( valutato per ogni singolo MarkerCliente e rispettivo MarkerPOI )
+      for (var i = 0; i < array_costoMinimoPerPOI.length; i++) {
+        if (array_costoMinimoPerPOI[i] == "Not_defined") {
+          //Non_definito
+          //
+        } else {
+          //sommaDeiCostiPerSingolaCombinazione = sommaDeiCostiPerSingolaCombinazione + array_costiAfferenza[ i ][ arrayDiCombinazioni[ i ] ];
+          sommaDeiCostiPerCombinazioneFinale =
+            sommaDeiCostiPerCombinazioneFinale +
+            costoAfferenza(array_markerPOI[array_costoMinimoPerPOI[i]], array_markerClienti[i]);
+        }
+      }
+
+      //CostoAttivazioneManutenzione (valutato per ogni singolo MarkerPOI, non ripetuto nel caso in cui il MarkerPOI sia assegnato a più MarkerClienti )
+      for (var i = 0; i < array_markerPOIAttivi.length; i++) {
+        //sommaDeiCostiPerSingolaCombinazione = sommaDeiCostiPerSingolaCombinazione + array_costiAttivazioneManutenzione[ arrayDiCombinazioni[ i ] ];
+        sommaDeiCostiPerCombinazioneFinale =
+          sommaDeiCostiPerCombinazioneFinale + costoAttivazioneManutenzione(array_markerPOI[array_markerPOIAttivi[i]]);
+      }
+
+      print3(
+        "Cost identified based on the weights of the Alternatives and Criteria considered [Euro]: " +
+          sommaDeiCostiPerCombinazioneFinale.toFixed(2)
+      );
+
+      clearInterval(iv);
+
+      resolve("Operazione terminata");
+    };
+
+    var statoAvanzamento = () => {
+      if (riga <= array_markerClienti.length * 0.01 && array_markerClienti.length > 1) {
+        document.getElementById("progressBarCombinazioni").value = "0";
+      } else {
+        document.getElementById("progressBarCombinazioni").value =
+          "" + parseInt(((riga + 1.0) / array_markerClienti.length) * 100.0, 10);
+      }
+
+      document.getElementById("avanzamento").value =
+        "" + (riga + 1.0).toLocaleString("it") + " / " + array_markerClienti.length.toLocaleString("it");
+    };
+
+    //for( var riga = 0; riga < array_markerClienti.length; riga++ ) {
+    var riga = 0;
+    var iv = setInterval(function() {
+      if (terminaOperazione == true) {
+        print1("Operation interrupted");
+        terminaOperazione = false;
+        clearInterval(iv);
+        reject("Operazione interrotta");
+        return;
+      }
+
+      array_datiAHP.push({
+        numCliente: riga,
+        numPOI: new Array(),
+        Dist: new Array(),
+        Catt: new Array(),
+        Ctot: new Array(),
+        FattImp: new Array(),
+        DistPV: new Array(),
+        CattPV: new Array(),
+        CtotPV: new Array(),
+        FattImpPV: new Array(),
+        DistPVNorm: new Array(),
+        CattPVNorm: new Array(),
+        CtotPVNorm: new Array(),
+        FattImpPVNorm: new Array(),
+        AltPVNorm: new Array(), //Array bidimensionale
+        RisPV: new Array(),
+        numPOISelezionato: undefined
+      });
+
+      //
+
+      for (var colonna = 0; colonna < array_markerPOI.length; colonna++) {
+        if (
+          turf.booleanPointInPolygon(
+            turf.point([
+              array_markerPOI[colonna].options.coordinate[1],
+              array_markerPOI[colonna].options.coordinate[0]
+            ]),
+            array_markerClienti[riga].options.turfDistanza.turf
+          ) == true
+        ) {
+          array_datiAHP[riga]["numPOI"].push(array_markerPOI[colonna].options.numeroMarkerInserimento);
+          array_datiAHP[riga]["Dist"].push(array_distanzaClientiPOI[riga][colonna]);
+          array_datiAHP[riga]["Catt"].push(array_costiAttivazioneManutenzione[colonna]);
+          array_datiAHP[riga]["Ctot"].push(
+            array_costiAfferenza[riga][colonna] + array_costiAttivazioneManutenzione[colonna]
+          );
+          array_datiAHP[riga]["FattImp"].push(array_markerPOI[colonna].options.fattoreImpianto);
+        }
+      }
+
+      if (array_datiAHP[riga]["numPOI"].length == 0) {
+        print3("Customer Marker " + riga + " without associated POI Markers, not present in the considered radius.");
+
+        array_costoMinimoPerPOI.push("Not_defined"); //Non_definito
+      } else {
+        maxDist = undefined;
+        maxCatt = undefined;
+        maxCtot = undefined;
+        maxFattImp = undefined;
+        sommaDistPV = 0.0;
+        sommaCattPV = 0.0;
+        sommaCtotPV = 0.0;
+        sommaFattImpPV = 0.0;
+
+        maxDist = Math.max(...array_datiAHP[riga]["Dist"]);
+
+        for (var indice = 0; indice < array_datiAHP[riga]["Dist"].length; indice++) {
+          array_datiAHP[riga]["DistPV"].push(maxDist / array_datiAHP[riga]["Dist"][indice]);
+          sommaDistPV = sommaDistPV + array_datiAHP[riga]["DistPV"][indice];
+        }
+        maxCatt = Math.max(...array_datiAHP[riga]["Catt"]);
+        for (var indice = 0; indice < array_datiAHP[riga]["Catt"].length; indice++) {
+          array_datiAHP[riga]["CattPV"].push(maxCatt / array_datiAHP[riga]["Catt"][indice]);
+          sommaCattPV = sommaCattPV + array_datiAHP[riga]["CattPV"][indice];
+        }
+        maxCtot = Math.max(...array_datiAHP[riga]["Ctot"]);
+        for (var indice = 0; indice < array_datiAHP[riga]["Ctot"].length; indice++) {
+          array_datiAHP[riga]["CtotPV"].push(maxCtot / array_datiAHP[riga]["Ctot"][indice]);
+          sommaCtotPV = sommaCtotPV + array_datiAHP[riga]["CtotPV"][indice]; //DistPV
+        }
+        maxFattImp = Math.max(...array_datiAHP[riga]["FattImp"]);
+        for (var indice = 0; indice < array_datiAHP[riga]["FattImp"].length; indice++) {
+          array_datiAHP[riga]["FattImpPV"].push(maxFattImp / array_datiAHP[riga]["FattImp"][indice]);
+          sommaFattImpPV = sommaFattImpPV + array_datiAHP[riga]["FattImpPV"][indice];
+        }
+
+        //Valori normalizzati (sommatoria pari a 1)
+        for (var indice = 0; indice < array_datiAHP[riga]["DistPV"].length; indice++) {
+          array_datiAHP[riga]["DistPVNorm"].push(array_datiAHP[riga]["DistPV"][indice] / sommaDistPV);
+        }
+        for (var indice = 0; indice < array_datiAHP[riga]["CattPV"].length; indice++) {
+          array_datiAHP[riga]["CattPVNorm"].push(array_datiAHP[riga]["CattPV"][indice] / sommaCattPV);
+        }
+        for (var indice = 0; indice < array_datiAHP[riga]["CtotPV"].length; indice++) {
+          array_datiAHP[riga]["CtotPVNorm"].push(array_datiAHP[riga]["CtotPV"][indice] / sommaCtotPV);
+        }
+        for (var indice = 0; indice < array_datiAHP[riga]["FattImpPV"].length; indice++) {
+          array_datiAHP[riga]["FattImpPVNorm"].push(array_datiAHP[riga]["FattImpPV"][indice] / sommaFattImpPV);
+        }
+
+        //Matrice Alternative
+        for (var indice = 0; indice < array_datiAHP[riga]["numPOI"].length; indice++) {
+          //righe Matrice Alternative
+          array_datiAHP[riga]["AltPVNorm"].push(new Array(4)); //Colonne Matrice Alternative (numero Criteri)
+          array_datiAHP[riga]["AltPVNorm"][indice][0] = array_datiAHP[riga]["DistPVNorm"][indice];
+          array_datiAHP[riga]["AltPVNorm"][indice][1] = array_datiAHP[riga]["CattPVNorm"][indice];
+          array_datiAHP[riga]["AltPVNorm"][indice][2] = array_datiAHP[riga]["CtotPVNorm"][indice];
+          array_datiAHP[riga]["AltPVNorm"][indice][3] = array_datiAHP[riga]["FattImpPVNorm"][indice];
+        }
+
+        array_datiAHP[riga]["RisPV"] = JSON.parse(
+          JSON.stringify(prodottoMatrici(array_datiAHP[riga]["AltPVNorm"], criteriPV))
+        );
+
+        array_datiAHP[riga]["numPOISelezionato"] =
+          array_datiAHP[riga]["numPOI"][
+            array_datiAHP[riga]["RisPV"].indexOf(Math.max(...array_datiAHP[riga]["RisPV"]))
+          ];
+        array_costoMinimoPerPOI.push(array_datiAHP[riga]["numPOISelezionato"]);
+      }
+
+      //Stato avanzamento
+      statoAvanzamento();
+
+      if (riga == array_markerClienti.length - 1) {
+        operazioniFinali();
+        return;
+      }
+
+      riga = riga + 1;
+    }, 0);
+
+    /*
+    print3( sommaDistPV );
+    print3( sommaCattPV );
+    print3( sommaCtotPV );
+    print3( sommaFattImpPV );
+    print3( array_datiAHP[ 0 ][ "Dist" ] );
+    print3( array_datiAHP[ 0 ][ "Catt" ] );
+    print3( array_datiAHP[ 0 ][ "Ctot" ] );
+    print3( array_datiAHP[ 0 ][ "FattImp" ] );
+    print3( array_datiAHP[ 0 ][ "DistPV" ] );
+    print3( array_datiAHP[ 0 ][ "CattPV" ] );
+    print3( array_datiAHP[ 0 ][ "CtotPV" ] );
+    print3( array_datiAHP[ 0 ][ "FattImpPV" ] );
+    print3( array_datiAHP[ 0 ][ "DistPVNorm" ] );
+    print3( array_datiAHP[ 0 ][ "CattPVNorm" ] );
+    print3( array_datiAHP[ 0 ][ "CtotPVNorm" ] );
+    print3( array_datiAHP[ 0 ][ "FattImpPVNorm" ] );
+    print3("AltPVNorm: " + array_datiAHP[ 0 ][ "AltPVNorm" ] );
+  	
+    print3( "criteriPV: " + criteriPV );
+    */
+  });
+}
+
+///////////////////////////////////////////////////////file_trovaMarkerSullaMappa///////////////////////////////////////////////////////
+
+async function trovaMarkerSullaMappa() {
+  rimuoviMarkerSullaMappa();
+
+  latNE = mappa.getBounds()["_northEast"]["lat"];
+  lngNE = mappa.getBounds()["_northEast"]["lng"];
+  latSW = mappa.getBounds()["_southWest"]["lat"];
+  lngSW = mappa.getBounds()["_southWest"]["lng"];
+
+  var altezzaArea = ottieniDistanza(L.latLng(latNE, lngSW), L.latLng(latSW, lngSW));
+  var baseArea = ottieniDistanza(L.latLng(latSW, lngNE), L.latLng(latSW, lngSW));
+
+  areaInMappa = parseFloat((altezzaArea * baseArea).toFixed(6), 10);
+  document.getElementById("areaInMappa").value = "" + areaInMappa;
+
+  var coloreMarker = ""; //Non significativo, presenza di icone
+  var tipoMarker = "";
+
+  var contatoreClienti = 0;
+  var contatorePOI = 0;
+
+  print1("Waiting for results ...");
+
+  const api = await fetch("https://www.overpass-api.de/api/interpreter?", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    },
+    //Esempio: body:" [out:json][timeout:60];node(48.865,2.25,48.9,2.27)[amenity=restaurant];out; "
+    body:
+      " [out:json][timeout:60];" +
+      "(" +
+      "node" +
+      '[place~"town|village"]' +
+      "(" +
+      latSW +
+      ", " +
+      lngSW +
+      ", " +
+      latNE +
+      ", " +
+      lngNE +
+      ")" +
+      ";" +
+      "node" +
+      '[shop="supermarket"]' +
+      "(" +
+      latSW +
+      ", " +
+      lngSW +
+      ", " +
+      latNE +
+      ", " +
+      lngNE +
+      ")" +
+      ";" +
+      "node" +
+      "[amenity=charging_station]" +
+      "(" +
+      latSW +
+      ", " +
+      lngSW +
+      ", " +
+      latNE +
+      ", " +
+      lngNE +
+      ")" +
+      ";" +
+      "node" +
+      "[amenity=parking]" +
+      "(" +
+      latSW +
+      ", " +
+      lngSW +
+      ", " +
+      latNE +
+      ", " +
+      lngNE +
+      ")" +
+      ";" +
+      ");" +
+      "out; "
+  });
+  const risposta = await api.json();
+
+  //console.log(risposta);
+
+  if (risposta["elements"].length == 0) {
+    print1("Marker Search: no results found ...");
+  } else if (risposta["elements"].length > 0) {
+    print1("Search: results found ...");
+
+    for (var i = 0; i < risposta["elements"].length; i++) {
+      if (risposta["elements"][i]["tags"]["place"] == "town" || risposta["elements"][i]["tags"]["place"] == "village") {
+        tipoMarker = "clienti";
+      } else if (risposta["elements"][i]["tags"]["shop"] == "supermarket") {
+        tipoMarker = "mercatiPOI";
+      } else if (risposta["elements"][i]["tags"]["amenity"] == "charging_station") {
+        tipoMarker = "stazioniEsistentiPOI";
+      } else if (risposta["elements"][i]["tags"]["amenity"] == "parking") {
+        tipoMarker = "parcheggiPOI";
+      }
+
+      var lat = risposta["elements"][i]["lat"];
+      var lng = risposta["elements"][i]["lon"];
+      var amenity =
+        risposta["elements"][i]["tags"]["amenity"] == undefined
+          ? "Not specified"
+          : risposta["elements"][i]["tags"]["amenity"];
+      var nome =
+        risposta["elements"][i]["tags"]["name"] == undefined
+          ? "Not specified"
+          : risposta["elements"][i]["tags"]["name"];
+      var marker = ottieniMarker([lat, lng], tipoMarker, coloreMarker);
+
+      marker.options.numeroMarkerInserimento =
+        tipoMarker == "clienti"
+          ? contatoreClienti
+          : tipoMarker == "mercatiPOI" || tipoMarker == "stazioniEsistentiPOI" || tipoMarker == "parcheggiPOI"
+          ? contatorePOI
+          : "Not specified";
+      marker.options.coordinate = [parseFloat(lat.toFixed(6), 10), parseFloat(lng.toFixed(6), 10)];
+      marker.options.amenity = amenity;
+      marker.options.nome = nome;
+      marker.options.tipoMarker = tipoMarker;
+
+      if (tipoMarker == "clienti") {
+        marker.options.fattoreImpianto = fattoreImpiantoClienti;
+      } else if (tipoMarker == "mercatiPOI") {
+        marker.options.fattoreImpianto = fattoreImpiantoMercatiPOI;
+      } else if (tipoMarker == "stazioniEsistentiPOI") {
+        marker.options.fattoreImpianto = fattoreImpiantostazioniEsistentiPOI;
+      } else if (tipoMarker == "parcheggiPOI") {
+        marker.options.fattoreImpianto = fattoreImpiantoParcheggiPOI;
+      } else {
+        marker.options.fattoreImpianto = "Not specified";
+      }
+
+      marker.options.sommatoriaFlussi =
+        tipoMarker == "clienti"
+          ? "Not expected"
+          : tipoMarker == "mercatiPOI" || tipoMarker == "stazioniEsistentiPOI" || tipoMarker == "parcheggiPOI"
+          ? sommatoriaFlussi
+          : "Not specified";
+
+      marker.options.fattorePendolarismo =
+        tipoMarker == "clienti"
+          ? "Not expected"
+          : tipoMarker == "mercatiPOI" || tipoMarker == "stazioniEsistentiPOI" || tipoMarker == "parcheggiPOI"
+          ? fattorePendolarismo
+          : "Not specified";
+
+      marker.options.turfDistanza = new Turf(
+        turf.circle([marker.options.coordinate[1], marker.options.coordinate[0]], 0.2, {
+          steps: 250,
+          units: "kilometers"
+        }),
+        "green"
+      );
+
+      aggiornaPopupSingoloMarker(marker);
+
+      if (tipoMarker == "clienti") {
+        var select_risultatiMarkerClienteAHP = document.getElementById("select_risultatiMarkerClienteAHP");
+        var option = document.createElement("option");
+        option.value = "" + contatoreClienti;
+        option.text = "Customer Marker " + contatoreClienti;
+        select_risultatiMarkerClienteAHP.add(option);
+
+        array_markerClienti.push(marker);
+        contatoreClienti++;
+      } else if (tipoMarker == "mercatiPOI" || tipoMarker == "stazioniEsistentiPOI" || tipoMarker == "parcheggiPOI") {
+        array_markerPOI.push(marker);
+        contatorePOI++;
+      }
+    }
+  }
+
+  inMappa(array_markerClienti, "visible");
+  print1("Number of Customers Markers on map: " + array_markerClienti.length);
+
+  densitaAbitativa = parseFloat(((array_markerClienti.length * numeroClientiPerComunita) / areaInMappa).toFixed(6), 10);
+  document.getElementById("densitaAbitativa").value = "" + densitaAbitativa;
+
+  inMappa(array_markerPOI, "visible");
+  print1(
+    "Number of POI Markers on map (Points Of Interest, i.e. markets, existing charging stations, car parks) " +
+      array_markerPOI.length
+  );
+
+  calcolaMatriciDiCosti();
+  mostraVariabili();
+}
+
+///////////////////////////////////////////////////////file_eventiSullaMappa///////////////////////////////////////////////////////
+
+function eventiSullaMappa() {
+  //MouseMove
+  mappa.on("mousemove", function(e) {
+    latitudine = e.latlng.lat.toFixed(6);
+    longitudine = e.latlng.lng.toFixed(6);
+    document.getElementById("label_coordinate").innerHTML =
+      "Latitude, longitude, zoom: " + latitudine + "::" + longitudine + "::" + zoom + "<br>   ";
+
+    if (stato_calcolaDistanzaSullaMappa == true) {
+      if (array_calcolaDistanzaSullaMappa.length >= 1) {
+        if (mappa.hasLayer(polilineaTemp_calcolaDistanzaSullaMappa)) {
+          inMappa([polilineaTemp_calcolaDistanzaSullaMappa], "invisible");
+        }
+        var ultimaPosizione = array_calcolaDistanzaSullaMappa.length - 1;
+        polilineaTemp_calcolaDistanzaSullaMappa = ottieniPolilinea(
+          [array_calcolaDistanzaSullaMappa[ultimaPosizione].getLatLng(), L.latLng(latitudine, longitudine)],
+          "red"
+        );
+        inMappa([polilineaTemp_calcolaDistanzaSullaMappa], "visible");
+      }
+    } else if (stato_calcolaAreaSullaMappa == true) {
+      if (array_calcolaAreaSullaMappa.length == 1) {
+        if (areaTemp_calcolaAreaSullaMappa.geoJSON != null && mappa.hasLayer(areaTemp_calcolaAreaSullaMappa.geoJSON)) {
+          inMappa([areaTemp_calcolaAreaSullaMappa.geoJSON], "invisible");
+        }
+
+        areaTemp_calcolaAreaSullaMappa = new Turf(
+          turf.lineString([array_calcolaAreaSullaMappa[0], [longitudine, latitudine]]),
+          "red"
+        );
+        inMappa([areaTemp_calcolaAreaSullaMappa.geoJSON], "visible");
+      } else if (array_calcolaAreaSullaMappa.length >= 2) {
+        if (areaTemp_calcolaAreaSullaMappa.geoJSON != null && mappa.hasLayer(areaTemp_calcolaAreaSullaMappa.geoJSON)) {
+          inMappa([areaTemp_calcolaAreaSullaMappa.geoJSON], "invisible");
+        }
+        var ultimaPosizione = array_calcolaAreaSullaMappa.length - 1;
+        var array_coordLngLat = [];
+        for (var i = 0; i < array_calcolaAreaSullaMappa.length; i++) {
+          array_coordLngLat.push(array_calcolaAreaSullaMappa[i]);
+        }
+        array_coordLngLat.push([longitudine, latitudine]);
+        array_coordLngLat.push(array_calcolaAreaSullaMappa[0]);
+
+        areaTemp_calcolaAreaSullaMappa = new Turf(turf.polygon([array_coordLngLat]), "red");
+        inMappa([areaTemp_calcolaAreaSullaMappa.geoJSON], "visible");
+      }
+    }
+  });
+
+  //Zoomend
+  mappa.on("zoomend", function(e) {
+    zoom = mappa.getZoom();
+    document.getElementById("label_coordinate").innerHTML =
+      "Latitude, longitude, zoom: " + latitudine + " :: " + longitudine + " :: " + zoom;
+  });
+
+  //Click
+  mappa.on("click", function(e) {
+    //CalcolaArea
+    if (stato_calcolaAreaSullaMappa == true) {
+      var lat = parseFloat(e.latlng.lat);
+      var lng = parseFloat(e.latlng.lng);
+      array_calcolaAreaSullaMappa.push([lng, lat]);
+
+      if (array_calcolaAreaSullaMappa.length >= 2) {
+        inMappa([areaTemp_calcolaAreaSullaMappa.geoJSON], "invisible");
+        inMappa([area_calcolaAreaSullaMappa.geoJSON], "invisible");
+        if (array_calcolaAreaSullaMappa.length == 2) {
+          area_calcolaAreaSullaMappa = new Turf(
+            turf.lineString([array_calcolaAreaSullaMappa[0], array_calcolaAreaSullaMappa[1]])
+          );
+          inMappa([area_calcolaAreaSullaMappa.geoJSON], "visible");
+          areaSullaMappa = 0;
+        } else {
+          var array_coordLngLat = [];
+          for (var i = 0; i < array_calcolaAreaSullaMappa.length; i++) {
+            array_coordLngLat.push(array_calcolaAreaSullaMappa[i]);
+          }
+
+          array_coordLngLat.push(array_calcolaAreaSullaMappa[0]);
+
+          area_calcolaAreaSullaMappa = new Turf(turf.polygon([array_coordLngLat]), "red");
+          inMappa([area_calcolaAreaSullaMappa.geoJSON], "visible");
+
+          areaSullaMappa = turf.area(area_calcolaAreaSullaMappa.turf) / 1000000.0;
+        }
+      }
+
+      //CalcolaDistanza
+    } else if (stato_calcolaDistanzaSullaMappa == true) {
+      var lat = parseFloat(e.latlng.lat);
+      var lng = parseFloat(e.latlng.lng);
+      var marker = ottieniMarker([lat, lng], null, "red");
+      array_calcolaDistanzaSullaMappa.push(marker);
+
+      if (array_calcolaDistanzaSullaMappa.length >= 2) {
+        inMappa([polilineaTemp_calcolaDistanzaSullaMappa], "invisible");
+        inMappa([polilinea_calcolaDistanzaSullaMappa], "invisible");
+
+        var array_coordMarker = [];
+        distanzaSullaMappa = 0;
+        for (var i = 0; i < array_calcolaDistanzaSullaMappa.length; i++) {
+          array_coordMarker.push(array_calcolaDistanzaSullaMappa[i].getLatLng());
+          if (i >= 1) {
+            distanzaSullaMappa =
+              distanzaSullaMappa +
+              ottieniDistanza(
+                array_calcolaDistanzaSullaMappa[i].getLatLng(),
+                array_calcolaDistanzaSullaMappa[i - 1].getLatLng()
+              );
+          }
+        }
+
+        polilinea_calcolaDistanzaSullaMappa = ottieniPolilinea(array_coordMarker, "red");
+        inMappa([polilinea_calcolaDistanzaSullaMappa], "visible");
+      }
+
+      //Trova Percorso
+    } else if (stato_trovaPercorsoSullaMappa == 1) {
+      if (array_inizioFinePercorso.length == 2) {
+        rimuoviTrovaPercorsoSullaMappa();
+      }
+      var lat = parseFloat(e.latlng.lat);
+      var lng = parseFloat(e.latlng.lng);
+      var marker = ottieniMarker([lat, lng], null, "green");
+      marker
+        .getPopup()
+        .setContent(
+          (array_inizioFinePercorso.length == 0 ? "Initial" : "Final") +
+            " coordinates" +
+            ": " +
+            lat.toFixed(6) +
+            ", " +
+            lng.toFixed(6)
+        );
+      array_inizioFinePercorso.push(marker);
+      if (array_inizioFinePercorso.length == 1) {
+        inMappa([array_inizioFinePercorso[0]], "visible");
+      }
+      if (array_inizioFinePercorso.length == 2) {
+        inMappa([array_inizioFinePercorso[1]], "visible");
+        cercaPercorsoOSRMSullaMappa(
+          array_inizioFinePercorso[0].getLatLng().lat,
+          array_inizioFinePercorso[0].getLatLng().lng,
+          array_inizioFinePercorso[1].getLatLng().lat,
+          array_inizioFinePercorso[1].getLatLng().lng
+        );
+      }
+    } else {
+      print1("Click on map - latitude, longitude: " + latitudine + " :: " + longitudine);
+    }
+  });
+}
+
+///////////////////////////////////////////////////////file_funzioniDiSupporto///////////////////////////////////////////////////////
+
+function primoAvvio() {
+  mappa = L.map("mappa", { zoomDelta: 1.0 }).setView([latitudine, longitudine], zoom);
+  mappaDiBase = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png");
+  mappaDiBase.addTo(mappa);
+
+  L.control.scale().addTo(mappa);
+
+  document.getElementById("numeroClientiPerComunita").value = "" + numeroClientiPerComunita;
+  document.getElementById("euroSpesiPerChilometroAutoElettrica").value =
+    "" + euroSpesiPerChilometroAutoElettrica.toFixed(2);
+  document.getElementById("costoAttivazioneManutenzioneImpianto1").value =
+    "" + costoAttivazioneManutenzioneImpianto1.toFixed(2);
+  document.getElementById("costoAttivazioneManutenzioneImpianto2").value =
+    "" + costoAttivazioneManutenzioneImpianto2.toFixed(2);
+
+  document.getElementById("fattoreImpiantoMercatiPOI").value = "" + fattoreImpiantoMercatiPOI.toFixed(2);
+  document.getElementById("fattoreImpiantostazioniEsistentiPOI").value =
+    "" + fattoreImpiantostazioniEsistentiPOI.toFixed(2);
+  document.getElementById("fattoreImpiantoParcheggiPOI").value = "" + fattoreImpiantoParcheggiPOI.toFixed(2);
+
+  document.getElementById("livelloCarica").value = "" + livelloCarica;
+}
+
+function calcolaDistanzaSullaMappa() {
+  stato_calcolaDistanzaSullaMappa = !stato_calcolaDistanzaSullaMappa;
+  if (stato_calcolaDistanzaSullaMappa == true) {
+    document.getElementById("button_calcolaDistanzaSullaMappa").style.background = "#ffa500";
+    document.getElementById("button_calcolaDistanzaSullaMappa").innerHTML = "Stop";
+    rimuoviCalcolaDistanzaSullaMappa();
+  } else if (stato_calcolaDistanzaSullaMappa == false) {
+    document.getElementById("button_calcolaDistanzaSullaMappa").style.background = "#f0f0f0";
+    document.getElementById("button_calcolaDistanzaSullaMappa").innerHTML = "DISTANCE";
+    inMappa([polilineaTemp_calcolaDistanzaSullaMappa], "invisible");
+    polilineaTemp_calcolaDistanzaSullaMappa = ottieniPolilinea([], "");
+    print1("Distance [Km]: " + distanzaSullaMappa.toFixed(3));
+  }
+}
+
+function rimuoviCalcolaDistanzaSullaMappa() {
+  inMappa(array_calcolaDistanzaSullaMappa, "invisible");
+  array_calcolaDistanzaSullaMappa = [];
+  inMappa([polilinea_calcolaDistanzaSullaMappa], "invisible");
+  polilinea_calcolaDistanzaSullaMappa = ottieniPolilinea([], "");
+  inMappa([polilineaTemp_calcolaDistanzaSullaMappa], "invisible");
+  polilineaTemp_calcolaDistanzaSullaMappa = ottieniPolilinea([], "");
+  distanzaSullaMappa = 0;
+}
+
+function calcolaAreaSullaMappa() {
+  stato_calcolaAreaSullaMappa = !stato_calcolaAreaSullaMappa;
+  if (stato_calcolaAreaSullaMappa == true) {
+    document.getElementById("button_calcolaAreaSullaMappa").style.background = "#ffa500";
+    document.getElementById("button_calcolaAreaSullaMappa").innerHTML = "Stop";
+    rimuoviCalcolaAreaSullaMappa();
+  } else if (stato_calcolaAreaSullaMappa == false) {
+    document.getElementById("button_calcolaAreaSullaMappa").style.background = "#f0f0f0";
+    document.getElementById("button_calcolaAreaSullaMappa").innerHTML = "AREA";
+    inMappa([areaTemp_calcolaAreaSullaMappa.geoJSON], "invisible");
+    areaTemp_calcolaAreaSullaMappa = new Turf(null, null);
+    print1("Area [Km^2]: " + areaSullaMappa.toFixed(4));
+  }
+}
+
+function rimuoviCalcolaAreaSullaMappa() {
+  array_calcolaAreaSullaMappa = [];
+  inMappa([area_calcolaAreaSullaMappa.geoJSON], "invisible");
+  area_calcolaAreaSullaMappa = new Turf(null, null);
+  inMappa([areaTemp_calcolaAreaSullaMappa], "invisible");
+  areaTemp_calcolaAreaSullaMappa = new Turf(null, null);
+  areaSullaMappa = 0;
+}
+
+function trovaPercorsoSullaMappa() {
+  stato_trovaPercorsoSullaMappa = !stato_trovaPercorsoSullaMappa;
+  if (stato_trovaPercorsoSullaMappa == true) {
+    document.getElementById("button_trovaPercorsoSullaMappa").style.background = "#ffa500";
+  } else {
+    document.getElementById("button_trovaPercorsoSullaMappa").style.background = "#f0f0f0";
+    rimuoviTrovaPercorsoSullaMappa();
+  }
+}
+
+function rimuoviTrovaPercorsoSullaMappa() {
+  inMappa(array_inizioFinePercorso, "invisible");
+  array_inizioFinePercorso = [];
+  inMappa(array_markerAllaRicarica, "invisible");
+  array_markerAllaRicarica = [];
+  array_puntiDelPercorso = [];
+  //livelloCarica = 20;
+  //autonomiaMacchina = 100.0;
+  //autonomiaPrevista = 20.0;
+  //profileOSRM = "car";
+  inMappa([lineString_trovaPercorsoSullaMappa.geoJSON], "invisible");
+  lineString_trovaPercorsoSullaMappa = new Turf(null, null);
+  //distanzaTotalePercorsa = 0.0;
+  array_distanzaIntersezioni = [];
+}
+
+function clearConsole1() {
+  var textArea = document.getElementById("textArea");
+  textArea.value = "";
+}
+
+function clearConsole2() {
+  var textArea = document.getElementById("textAreaAHP");
+  textArea.value = "";
+}
+
+function clearConsole3() {
+  var textArea = document.getElementById("textAreaAlgoritmi");
+  textArea.value = "";
+}
+
+function clearConsole4() {
+  var textArea = document.getElementById("textAreaPercorso");
+  textArea.value = "";
+}
+
+function cambiaMappaDiBase() {
+  for (var i = 1; i < 5; i++) {
+    if (document.getElementById("mappaDiBase0" + i).checked == true) {
+      //mappa.eachLayer(function (layer) {
+      //mappa.removeLayer(layer);
+      //});
+      mappa.removeLayer(mappaDiBase);
+      switch (i) {
+        case 1:
+          mappaDiBase = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png");
+          break;
+        case 2:
+          mappaDiBase = L.tileLayer("https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png");
+          //window.open("https://www.cyclosm.org/legend.html", "CycleOSM", "scrollbars=yes,width=650,height=500").focus();
+          print1("Please visit the page https://www.cyclosm.org/legend.html to see CycleOSM Legend");
+          break;
+        case 3:
+          mappaDiBase = L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
+          );
+          break;
+        case 4:
+          mappaDiBase = L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          );
+          break;
+      }
+      //mappaDiBase.addTo( mappa );
+      mappa.addLayer(mappaDiBase);
+    }
+  }
+}
+
+async function rimuoviMarkerSullaMappa() {
+  rimuoviCostoMinimoAlgoritmi(true, false);
+
+  inMappa(array_markerClienti, "invisible");
+  array_markerClienti = [];
+  inMappa(array_markerPOI, "invisible");
+  array_markerPOI = [];
+  //
+  array_markerPOISelezionati = [];
+
+  var select_risultatiMarkerClienteAHP = document.getElementById("select_risultatiMarkerClienteAHP");
+  var lengthOptionsSelectRisultatiMarkerClienteAHP = select_risultatiMarkerClienteAHP.options.length; //lunghezza originaria
+  for (var i = lengthOptionsSelectRisultatiMarkerClienteAHP - 1; i > 0; i--) {
+    //Escludo la prima combinazione //Riposizionamento elementi
+    select_risultatiMarkerClienteAHP.removeChild(select_risultatiMarkerClienteAHP.options[i]);
+  }
+
+  await initializeExcel("Variables", true);
+}
+
+function calcolaMatriciDiCosti() {
+  var riga;
+  var colonna;
+
+  if (array_markerClienti.length == 0) {
+    print1("The number of Customer Markers identified on the map is equal to 0; operation terminated.");
+    return;
+  }
+
+  if (array_markerPOI.length == 0) {
+    print1("The number of POI Markers identified on the map is equal to 0; operation terminated.");
+    return;
+  }
+
+  array_distanzaClientiPOI = new Array(array_markerClienti.length);
+  for (riga = 0; riga < array_markerClienti.length; riga++) {
+    array_distanzaClientiPOI[riga] = new Array(array_markerPOI.length);
+  }
+
+  for (riga = 0; riga < array_markerClienti.length; riga++) {
+    for (colonna = 0; colonna < array_markerPOI.length; colonna++) {
+      array_distanzaClientiPOI[riga][colonna] = ottieniDistanza(
+        array_markerPOI[colonna].getLatLng(),
+        array_markerClienti[riga].getLatLng()
+      );
+    }
+  }
+
+  //
+
+  array_costiAfferenza = new Array(array_markerClienti.length);
+  for (riga = 0; riga < array_markerClienti.length; riga++) {
+    array_costiAfferenza[riga] = new Array(array_markerPOI.length);
+  }
+
+  for (riga = 0; riga < array_markerClienti.length; riga++) {
+    for (colonna = 0; colonna < array_markerPOI.length; colonna++) {
+      array_costiAfferenza[riga][colonna] = costoAfferenza(array_markerPOI[colonna], array_markerClienti[riga]);
+    }
+  }
+
+  //
+
+  array_costiAttivazioneManutenzione = new Array(array_markerPOI.length);
+  for (colonna = 0; colonna < array_markerPOI.length; colonna++) {
+    array_costiAttivazioneManutenzione[colonna] = costoAttivazioneManutenzione(array_markerPOI[colonna]);
+  }
+}
+
+function costoAfferenza(markerImpianto, markerCliente) {
+  var costo =
+    ottieniDistanza(markerImpianto.getLatLng(), markerCliente.getLatLng()) *
+    euroSpesiPerChilometroAutoElettrica *
+    numeroClientiPerComunita;
+  return parseFloat(costo.toFixed(2), 10);
+}
+
+function costoAttivazioneManutenzione(markerImpianto) {
+  var costo = 0.0;
+  var numeratoreMediaAritmetica =
+    1.0 +
+    densitaAbitativa / 1000.0 +
+    markerImpianto.options.fattoreImpianto +
+    markerImpianto.options.fattorePendolarismo;
+  var denominatoreMediaAritmetica = 3.0;
+  if (markerImpianto.options.tipoMarker == "stazioniEsistentiPOI") {
+    var costo = (numeratoreMediaAritmetica / denominatoreMediaAritmetica) * costoAttivazioneManutenzioneImpianto1;
+  } else {
+    var costo = (numeratoreMediaAritmetica / denominatoreMediaAritmetica) * costoAttivazioneManutenzioneImpianto2;
+  }
+  return parseFloat(costo.toFixed(2), 10);
+}
+
+function rimuoviCostoMinimoAlgoritmi(rimuoviTurfDistanzaMarkerClienti, valoreOpzioneGreedy) {
+  stato_selezionaRipristinaMarkerPOISiaAttiviSiaStazioniEsistenti = false;
+  inMappa(array_markerPOI, "visible");
+
+  for (var i = 0; i < array_markerPOI.length; i++) {
+    inMappa([array_markerPOI[i].options.turfDistanza.geoJSON], "invisible");
+    array_markerPOI[i].options.turfDistanza = new Turf(
+      turf.circle([array_markerPOI[i].options.coordinate[1], array_markerPOI[i].options.coordinate[0]], 0.2, {
+        steps: 250,
+        units: "kilometers"
+      }),
+      "green"
+    );
+  }
+
+  if (rimuoviTurfDistanzaMarkerClienti == true) {
+    for (var i = 0; i < array_markerClienti.length; i++) {
+      inMappa([array_markerClienti[i].options.turfDistanza.geoJSON], "invisible");
+      array_markerClienti[i].options.turfDistanza = new Turf(
+        turf.circle([array_markerClienti[i].options.coordinate[1], array_markerClienti[i].options.coordinate[0]], 0.0, {
+          steps: 250,
+          units: "kilometers"
+        }),
+        "red"
+      ); ////
+    }
+    document.getElementById("variazioneTurfDistanzaMarkerClienti").value = "0.000";
+    document.getElementById("range_variazioneTurfDistanzaMarkerClienti").value = "0";
+  }
+
+  //numeroDiCombinazioniMassimo = 0;
+  costoMinimoPerPOI = Number.POSITIVE_INFINITY;
+  array_costoMinimoPerPOI = [];
+  inMappa(array_collegamentiCostoMinimoPerPOI, "invisible");
+  array_collegamentiCostoMinimoPerPOI = [];
+  inMappa(array_collegamentiTemporanei, "invisible");
+  array_collegamentiTemporanei = [];
+  document.getElementById("progressBarCombinazioni").value = "0";
+  document.getElementById("avanzamento").value = "";
+  //array_markerPOISelezionati = [];
+  array_markerPOIAttivi = [];
+  array_markerPOINONAttiviEsistenti = [];
+
+  opzioneGreedy = valoreOpzioneGreedy;
+
+  array_datiAHP = [];
+  var select_risultatiMarkerClienteAHP = document.getElementById("select_risultatiMarkerClienteAHP");
+  select_risultatiMarkerClienteAHP.value = -1;
+  //ripristinaMatriceAHP();
+  //clearConsole2();
+  //for( var i = 1; i < select_risultatiMarkerClienteAHP.options.length; i++ ) { //Escludo la prima combinazione
+  //select_risultatiMarkerClienteAHP.removeChild( select_risultatiMarkerClienteAHP.options[ i ] );
+  //}
+
+  //clearConsole3();
+}
+
+async function loadFile(file) {
+  /*
+	var file = document.getElementById("file input").files[0];
+	var reader = new FileReader();
+	console.log( file ); 
+	content = reader.readAsBinaryString(file );
+	console.log(content);
+	*/
+
+  var text = await file.text();
+
+  elaboraFlussiPendolarismo(text);
+}
+
+function ripristinoFattorePendolarismo() {
+  for (var i = 0; i < array_markerPOI.length; i++) {
+    array_markerPOI[i].options.fattorePendolarismo = 1;
+    array_markerPOI[i].options.sommatoriaFlussi = 0;
+    aggiornaPopupSingoloMarker(array_markerPOI[i]);
+  }
+  inMappa(array_collegamentiFlussi, "invisible");
+  array_collegamentiFlussi = [];
+
+  mostraVariabili(); 
+}
+
+function variazioneTurfDistanzaMarkerClienti() {
+  var turfDistanza = document.getElementById("range_variazioneTurfDistanzaMarkerClienti").value / 1000.0;
+  document.getElementById("variazioneTurfDistanzaMarkerClienti").value = turfDistanza.toFixed(3);
+
+  //Marker Clienti
+  for (var riga = 0; riga < array_markerClienti.length; riga++) {
+    inMappa([array_markerClienti[riga].options.turfDistanza.geoJSON], "invisible");
+    array_markerClienti[riga].options.turfDistanza = new Turf(
+      turf.circle(
+        [array_markerClienti[riga].options.coordinate[1], array_markerClienti[riga].options.coordinate[0]],
+        turfDistanza,
+        { steps: 250, units: "kilometers" }
+      ),
+      "red"
+    );
+
+    if (turfDistanza == 0.0) {
+      inMappa([array_markerClienti[riga].options.turfDistanza.geoJSON], "invisible");
+    } else if (turfDistanza > 0.0) {
+      inMappa([array_markerClienti[riga].options.turfDistanza.geoJSON], "visible");
+    }
+  }
+}
+
+function variazioneTurfDistanzaMarkerPOI() {
+  var turfDistanza = document.getElementById("range_variazioneTurfDistanzaMarkerPOI").value / 1000.0;
+  document.getElementById("variazioneTurfDistanzaMarkerPOI").value = turfDistanza.toFixed(3);
+
+  //MarkerPOI attivi
+  for (var indiceColonna = 0; indiceColonna < array_markerPOIAttivi.length; indiceColonna++) {
+    var numMarkerPOI = array_markerPOIAttivi[indiceColonna];
+    inMappa([array_markerPOI[numMarkerPOI].options.turfDistanza.geoJSON], "invisible");
+    array_markerPOI[numMarkerPOI].options.turfDistanza = new Turf(
+      turf.circle(
+        [array_markerPOI[numMarkerPOI].options.coordinate[1], array_markerPOI[numMarkerPOI].options.coordinate[0]],
+        turfDistanza,
+        { steps: 250, units: "kilometers" }
+      ),
+      "green"
+    );
+
+    inMappa([array_markerPOI[numMarkerPOI].options.turfDistanza.geoJSON], "visible");
+  }
+
+  //MarkerPOI NON attivi ed esistenti
+  for (var indiceColonna = 0; indiceColonna < array_markerPOINONAttiviEsistenti.length; indiceColonna++) {
+    var numMarkerPOI = array_markerPOINONAttiviEsistenti[indiceColonna];
+    inMappa([array_markerPOI[numMarkerPOI].options.turfDistanza.geoJSON], "invisible");
+    array_markerPOI[numMarkerPOI].options.turfDistanza = new Turf(
+      turf.circle(
+        [array_markerPOI[numMarkerPOI].options.coordinate[1], array_markerPOI[numMarkerPOI].options.coordinate[0]],
+        turfDistanza,
+        { steps: 250, units: "kilometers" }
+      ),
+      "orange"
+    );
+
+    inMappa([array_markerPOI[numMarkerPOI].options.turfDistanza.geoJSON], "visible");
+  }
+}
+
+function variazioneTurfIntersezioni() {
+  array_distanzaIntersezioni = [];
+
+  //Marker POI attivi
+  for (var indiceColonna = 0; indiceColonna < array_markerPOIAttivi.length; indiceColonna++) {
+    var numMarkerPOI = array_markerPOIAttivi[indiceColonna];
+
+    if (lineString_trovaPercorsoSullaMappa.turf != null) {
+      var intersezione = turf.lineIntersect(
+        lineString_trovaPercorsoSullaMappa.turf,
+        array_markerPOI[numMarkerPOI].options.turfDistanza.turf
+      );
+      //print4( intersezione.features );
+      if (intersezione.features.length > 0) {
+        array_distanzaIntersezioni.push(array_markerPOI[numMarkerPOI].options.numeroMarkerInserimento);
+      }
+    }
+  }
+
+  //Marker POI NON attivi ed esistenti
+  for (var indiceColonna = 0; indiceColonna < array_markerPOINONAttiviEsistenti.length; indiceColonna++) {
+    var numMarkerPOI = array_markerPOINONAttiviEsistenti[indiceColonna];
+
+    if (lineString_trovaPercorsoSullaMappa.turf != null) {
+      var intersezione = turf.lineIntersect(
+        lineString_trovaPercorsoSullaMappa.turf,
+        array_markerPOI[numMarkerPOI].options.turfDistanza.turf
+      );
+      //print4( intersezione.features );
+      if (intersezione.features.length > 0) {
+        array_distanzaIntersezioni.push(array_markerPOI[numMarkerPOI].options.numeroMarkerInserimento);
+      }
+    }
+  }
+
+  if (lineString_trovaPercorsoSullaMappa.turf == null) {
+    //print4("Nessun percorso individuato in mappa. ");
+  } else if (lineString_trovaPercorsoSullaMappa.turf != null && array_distanzaIntersezioni.length == 0) {
+    print4("No electric charging stations identified along the route.");
+  } else if (lineString_trovaPercorsoSullaMappa.turf != null && array_distanzaIntersezioni.length > 0) {
+    print4("Electric charging stations identified [MarkerNumber]: " + array_distanzaIntersezioni);
+  }
+}
+
+function ricercaCollegamentiConCostoMinimoPOIAttivi() {
+  var array_rigaCostiAfferenzaClientiPOIAttivi = [];
+  var sommaCostiAfferenzaClientiPOIAttiviSelezioneCostoAfferenza = 0;
+  var minimoRiga = null;
+
+  //Costi Afferenza
+  for (var riga = 0; riga < array_markerClienti.length; riga++) {
+    array_rigaCostiAfferenzaClientiPOIAttivi = [];
+    for (var indiceColonna = 0; indiceColonna < array_markerPOIAttivi.length; indiceColonna++) {
+      array_rigaCostiAfferenzaClientiPOIAttivi.push(array_costiAfferenza[riga][array_markerPOIAttivi[indiceColonna]]);
+    }
+
+    minimoRiga = Math.min(...array_rigaCostiAfferenzaClientiPOIAttivi);
+    sommaCostiAfferenzaClientiPOIAttiviSelezioneCostoAfferenza =
+      sommaCostiAfferenzaClientiPOIAttiviSelezioneCostoAfferenza + minimoRiga;
+    array_costoMinimoPerPOI.push(array_costiAfferenza[riga].indexOf(minimoRiga));
+  }
+
+  var array_markerPOIAttiviSelezioneCostoAfferenza = Array.from(new Set(array_costoMinimoPerPOI));
+
+  //Costi attivazione e manutenzione
+  for (var indiceColonna = 0; indiceColonna < array_markerPOIAttiviSelezioneCostoAfferenza.length; indiceColonna++) {
+    sommaCostiAfferenzaClientiPOIAttiviSelezioneCostoAfferenza =
+      sommaCostiAfferenzaClientiPOIAttiviSelezioneCostoAfferenza +
+      array_costiAttivazioneManutenzione[array_markerPOIAttiviSelezioneCostoAfferenza[indiceColonna]];
+  }
+
+  costoMinimoPerPOI = sommaCostiAfferenzaClientiPOIAttiviSelezioneCostoAfferenza;
+}
+
+function collegamentiInMappaMarkerPOIClienti() {
+  inMappa(array_collegamentiTemporanei, "invisible");
+  array_collegamentiTemporanei = [];
+
+  inMappa(array_collegamentiCostoMinimoPerPOI, "invisible");
+  array_collegamentiCostoMinimoPerPOI = [];
+
+  for (var i = 0; i < array_markerPOI.length; i++) {
+    inMappa([array_markerPOI[i].options.turfDistanza.geoJSON], "invisible");
+    array_markerPOI[i].options.turfDistanza = new Turf(
+      turf.circle([array_markerPOI[i].options.coordinate[1], array_markerPOI[i].options.coordinate[0]], 0.2, {
+        steps: 250,
+        units: "kilometers"
+      }),
+      "green"
+    );
+  }
+
+  for (var i = 0; i < array_costoMinimoPerPOI.length; i++) {
+    if (array_costoMinimoPerPOI[i] == "Not_defined") {
+      //Non_definito
+      //Metodologia AHP
+    } else {
+      array_collegamentiCostoMinimoPerPOI.push(
+        ottieniPolilinea(
+          [array_markerPOI[array_costoMinimoPerPOI[i]].getLatLng(), array_markerClienti[i].getLatLng()],
+          "green"
+        )
+      );
+      inMappa([array_markerPOI[array_costoMinimoPerPOI[i]].options.turfDistanza.geoJSON], "visible"); //Distanza Marker POI
+    }
+  }
+
+  for (var i = 0; i < array_markerPOI.length; i++) {
+    if (array_markerPOI[i].options.tipoMarker == "stazioniEsistentiPOI" && array_markerPOIAttivi.indexOf(i) < 0) {
+      array_markerPOINONAttiviEsistenti.push(array_markerPOI[i].options.numeroMarkerInserimento);
+      array_markerPOI[i].options.turfDistanza = new Turf(
+        turf.circle([array_markerPOI[i].options.coordinate[1], array_markerPOI[i].options.coordinate[0]], 0.2, {
+          steps: 250,
+          units: "kilometers"
+        }),
+        "orange"
+      );
+
+      inMappa([array_markerPOI[i].options.turfDistanza.geoJSON], "visible");
+    }
+  }
+
+  inMappa(array_collegamentiCostoMinimoPerPOI, "visible");
+}
+
+function gestioneSchede(scheda) {
+  var schedaInput = document.getElementById("schedaInput");
+  var schedaColonnine = document.getElementById("schedaColonnine");
+  var schedaPercorso = document.getElementById("schedaPercorso");
+
+  if (scheda == "schedaInput") {
+    schedaInput.style.display = "block";
+    schedaInput.style.visibility = "visible";
+    schedaColonnine.style.display = "none";
+    schedaColonnine.style.visibility = "hidden";
+    schedaPercorso.style.display = "none";
+    schedaPercorso.style.visibility = "hidden";
+  } else if (scheda == "schedaColonnine") {
+    schedaInput.style.display = "none";
+    schedaInput.style.visibility = "hidden";
+    schedaColonnine.style.display = "block";
+    schedaColonnine.style.visibility = "visible";
+    schedaPercorso.style.display = "none";
+    schedaPercorso.style.visibility = "hidden";
+  } else if (scheda == "schedaPercorso") {
+    schedaInput.style.display = "none";
+    schedaInput.style.visibility = "hidden";
+    schedaColonnine.style.display = "none";
+    schedaColonnine.style.visibility = "hidden";
+    schedaPercorso.style.display = "block";
+    schedaPercorso.style.visibility = "visible";
+  }
+}
+
+function aggiornaPopupSingoloMarker(marker) {
+  //marker.getPopup().getContent()
+
+  var exprMarkerType = "";
+  /*************************************************************************************/
+  if (marker.options.tipoMarker == "clienti") {
+    exprMarkerType = "MarkerType: " + "customers" + "<br>";
+  } else if (marker.options.tipoMarker == "mercatiPOI") {
+    exprMarkerType = "MarkerType: " + "marketsPOI" + "<br>";
+  } else if (marker.options.tipoMarker == "stazioniEsistentiPOI") {
+    exprMarkerType = "MarkerType: " + "existingChargingStationsPOI" + "<br>";
+  } else if (marker.options.tipoMarker == "parcheggiPOI") {
+    exprMarkerType = "MarkerType: " + "parkingAreasPOI" + "<br>";
+  } else {
+    //Non previsto
+    exprMarkerType = "MarkerType: " + "" + "<br>";
+  }
+  /*************************************************************************************/
+
+  marker.getPopup().setContent(
+    "" +
+      "InsertionNumberMarker: " +
+      marker.options.numeroMarkerInserimento +
+      "<br>" +
+      "Coordinates: " +
+      marker.options.coordinate +
+      "<br>" +
+      "Amenity: " +
+      marker.options.amenity +
+      "<br>" +
+      "Name: " +
+      marker.options.nome +
+      "<br>" +
+      //"MarkerType: " + marker.options.tipoMarker + "<br>" +
+      exprMarkerType +
+      "ImplantFactor: " +
+      marker.options.fattoreImpianto +
+      "<br>" +
+      "FlowSum_(NumberOfPeople): " +
+      marker.options.sommatoriaFlussi +
+      "<br>" +
+      "CommutingFactor: " +
+      marker.options.fattorePendolarismo
+  );
+}
+
+function aggiornaOptionsSingoloMarker(marker) {
+  if (marker.options.tipoMarker == "mercatiPOI") {
+    marker.options.fattoreImpianto = fattoreImpiantoMercatiPOI;
+  } else if (marker.options.tipoMarker == "stazioniEsistentiPOI") {
+    marker.options.fattoreImpianto = fattoreImpiantostazioniEsistentiPOI;
+  } else if (marker.options.tipoMarker == "parcheggiPOI") {
+    marker.options.fattoreImpianto = fattoreImpiantoParcheggiPOI;
+  }
+}
+
+function aggiornaArrayMarkerPOI() {
+  for (var i = 0; i < array_markerPOI.length; i++) {
+    aggiornaOptionsSingoloMarker(array_markerPOI[i]);
+    aggiornaPopupSingoloMarker(array_markerPOI[i]);
+  }
+}
+
+function ottieniMarker(array_latLng, tipoMarker, coloreMarker) {
+  var tipoIcona = null;
+
+  if (tipoMarker == "clienti") {
+    tipoIcona = new L.Icon({
+      iconUrl: "https://raw.githubusercontent.com/GeoInf25/Applications/refs/heads/main/iconWebApp/customer.png",
+      //"./icon/customer.png",
+      iconSize: [30, 30],
+      iconAnchor: [15, 30],
+      popupAnchor: [0, -30]
+    });
+  } else if (tipoMarker == "mercatiPOI") {
+    tipoIcona = new L.Icon({
+      iconUrl: "https://raw.githubusercontent.com/GeoInf25/Applications/refs/heads/main/iconWebApp/store.png",
+      //"./icon/store.png",
+      iconSize: [30, 30],
+      iconAnchor: [15, 30],
+      popupAnchor: [0, -30]
+    });
+  } else if (tipoMarker == "stazioniEsistentiPOI") {
+    tipoIcona = new L.Icon({
+      iconUrl:
+        "https://raw.githubusercontent.com/GeoInf25/Applications/refs/heads/main/iconWebApp/charging-station.png",
+      //"./icon/charging-station.png",
+      iconSize: [30, 30],
+      iconAnchor: [15, 30],
+      popupAnchor: [0, -30]
+    });
+  } else if (tipoMarker == "parcheggiPOI") {
+    tipoIcona = new L.Icon({
+      iconUrl: "https://raw.githubusercontent.com/GeoInf25/Applications/refs/heads/main/iconWebApp/parking.png",
+      //"./icon/parking.png",
+      iconSize: [30, 30],
+      iconAnchor: [15, 30],
+      popupAnchor: [0, -30]
+    });
+  } else {
+    tipoIcona = L.AwesomeMarkers.icon({
+      //icon: 'home',
+      markerColor: coloreMarker
+    });
+  }
+  return new markerPersonalizzato(array_latLng, { icon: tipoIcona })
+    .bindPopup("", { maxWidth: "330", className: "custom" })
+    .on("mouseover", function(e) {
+      this.openPopup();
+    })
+    .on("mouseout", function(e) {
+      this.closePopup();
+    });
+}
+
+function inMappa(array, presence) {
+  for (var i = 0; i < array.length; i++) {
+    if (presence == "visible") {
+      if (array[i] != null) {
+        mappa.addLayer(array[i]);
+      }
+    } else if (presence == "invisible") {
+      if (array[i] != null) {
+        mappa.removeLayer(array[i]);
+      }
+    }
+  }
+}
+
+function print1(testoConsole) {
+  var textArea = document.getElementById("textArea");
+  var separatore = "";
+  if (textArea.value != "") {
+    separatore = "\n::::::::::\n";
+  }
+  textArea.value = textArea.value + separatore + testoConsole;
+  //textArea.focus();
+  textArea.scrollTop = textArea.scrollHeight;
+}
+
+function print2(testoConsole) {
+  var textAreaAHP = document.getElementById("textAreaAHP");
+  var separatore = "";
+  if (textAreaAHP.value != "") {
+    separatore = "\n::::::::::\n";
+  }
+  textAreaAHP.value = textAreaAHP.value + separatore + testoConsole;
+  //textArea.focus();
+  textAreaAHP.scrollTop = textAreaAHP.scrollHeight;
+}
+
+function print3(testoConsole) {
+  var textAreaAlgoritmi = document.getElementById("textAreaAlgoritmi");
+  var separatore = "";
+  if (textAreaAlgoritmi.value != "") {
+    separatore = "\n::::::::::\n";
+  }
+  textAreaAlgoritmi.value = textAreaAlgoritmi.value + separatore + testoConsole;
+  //textArea.focus();
+  textAreaAlgoritmi.scrollTop = textAreaAlgoritmi.scrollHeight;
+}
+
+function print4(testoConsole) {
+  var textAreaPercorso = document.getElementById("textAreaPercorso");
+  var separatore = "";
+  if (textAreaPercorso.value != "") {
+    separatore = "\n::::::::::\n";
+  }
+  textAreaPercorso.value = textAreaPercorso.value + separatore + testoConsole;
+  //textArea.focus();
+  textAreaPercorso.scrollTop = textAreaPercorso.scrollHeight;
+}
+
+function sprintf(testo) {
+  return ("" + testo).padEnd(22, " ");
+}
+
+function printVettoreColonna(array) {
+  var ris = "";
+  for (var pos = 0; pos < array.length; pos++) {
+    ris = ris + (Number.isInteger(array[pos]) ? array[pos] : array[pos].toFixed(6)) + "\n";
+  }
+  return ris;
+}
+
+function printMatrice2D(array) {
+  var ris = "";
+  for (var righe = 0; righe < array.length; righe++) {
+    for (var colonne = 0; colonne < array[0].length; colonne++) {
+      ris =
+        ris +
+        (
+          "" + (Number.isInteger(array[righe][colonne]) ? array[righe][colonne] : array[righe][colonne].toFixed(6))
+        ).padEnd(22, " ");
+    }
+    ris = ris + "\n";
+  }
+  return ris;
+}
+
+function ottieniDistanza(array_latLng1, array_latLng2) {
+  //argomenti L.latLng
+  if (tipoDistanza == "Euclidea") {
+    return parseFloat((array_latLng1.distanceTo(array_latLng2) / 1000.0).toFixed(6), 10); //in chilometri
+  } else if (tipoDistanza == "Manhattan") {
+    var lng1 = array_latLng1.lng;
+    var lat1 = array_latLng1.lat;
+    var lng2 = array_latLng2.lng;
+    var lat2 = array_latLng2.lat;
+    var distanzaInMetri =
+      L.latLng(lat1, lng1).distanceTo(L.latLng(lat1, lng2)) + L.latLng(lat1, lng2).distanceTo(L.latLng(lat2, lng2));
+    return parseFloat((distanzaInMetri / 1000.0).toFixed(6), 10); //in chilometri
+  }
+}
+
+function ottieniPolilinea(array_latLng, colorePolilinea) {
+  return new L.Polyline(array_latLng, { color: colorePolilinea, weight: 3, opacity: 1, smoothFactor: 1 });
+}
+
+function incrementaArrayGreedy(
+  arrayDiCombinazioni,
+  numeroMassimoPOI,
+  iterazioneGreedy,
+  numeroDiCombinazioniMassimoGreedy
+) {
+  //var ultimoCliente = arrayDiCombinazioni.length - 1;
+  var ultimoPOI = numeroMassimoPOI - 1;
+
+  //var riga = ultimoCliente;
+  var ripeti = true;
+
+  print3("\tMaximum number of combinations (Greedy algorithm): " + numeroDiCombinazioniMassimoGreedy);
+
+  while (ripeti == true) {
+    if (iterazioneGreedy > 0) {
+      var contatoreZeri = 0;
+      for (var i = 0; i < arrayDiCombinazioni.length; i++) {
+        if (arrayDiCombinazioni[i] == 0) {
+          contatoreZeri = contatoreZeri + 1;
+        }
+      }
+
+      if (contatoreZeri == arrayDiCombinazioni.length) {
+        return iterazioneGreedy;
+      }
+    }
+
+    incrementaArray(arrayDiCombinazioni, numeroMassimoPOI);
+    if (iterazioneGreedy < numeroDiCombinazioniMassimoGreedy - 1) {
+      iterazioneGreedy = iterazioneGreedy + 1;
+    }
+    print3(
+      "\tGreedy counter increment: \n" +
+        "\t- combination [internal MarkerNumber]: " +
+        arrayDiCombinazioni +
+        "\n" +
+        "\t- iteration:  " +
+        iterazioneGreedy
+    );
+
+    for (var pos = 0; pos < ultimoPOI; pos++) {
+      if (arrayDiCombinazioni.includes(pos) == false) {
+        ripeti = true;
+
+        break;
+      } else if (arrayDiCombinazioni.includes(pos) == true) {
+        ripeti = false;
+      }
+    }
+  }
+  return iterazioneGreedy;
+}
+
+function incrementaArray(arrayDiCombinazioni, numeroMassimoPOI) {
+  if (arrayDiCombinazioni.length == 0) {
+    print3("ArrayOfCombinations not initialized. Operation terminated.");
+    return;
+  }
+
+  var ultimoCliente = arrayDiCombinazioni.length - 1;
+  var ultimoPOI = numeroMassimoPOI - 1;
+
+  var riga = ultimoCliente;
+  var ripeti = true;
+
+  while (ripeti && riga >= 0) {
+    if (arrayDiCombinazioni[riga] < ultimoPOI) {
+      arrayDiCombinazioni[riga] = arrayDiCombinazioni[riga] + 1;
+      ripeti = false;
+    } else if (arrayDiCombinazioni[riga] == ultimoPOI) {
+      arrayDiCombinazioni[riga] = 0;
+      riga--;
+      ripeti = true;
+    }
+  }
+}
+
+function ripristinaMatriceAHP() {
+  for (var riga = 0; riga < array_punteggioAHP.length; riga++) {
+    for (var colonna = 0; colonna < array_punteggioAHP[riga].length; colonna++) {
+      array_punteggioAHP[riga][colonna] = 1.0;
+      document.getElementById("punteggioAHP" + riga + colonna).value = "1";
+    }
+  }
+
+  criteriPV = [];
+}
+
+function ordinaArray(array) {
+  return array.sort(function(a, b) {
+    return a - b;
+  });
+}
+
+function prodottoMatrici(array1, array2) {
+  if (array1[0].length != array2.length) {
+    print3("Product between matrices not allowed; operation terminated.");
+    return;
+  }
+
+  var sommatoria = 0;
+
+  var array3 = new Array(array1.length);
+  //for( var riga1 = 0; riga1 < array1.length; riga1++ ) {
+  //array3[ riga1 ] = new Array( array2[0].length );
+  //}
+
+  for (var riga1 = 0; riga1 < array1.length; riga1++) {
+    for (var colonna2 = 0; colonna2 < 1; colonna2++) {
+      //array2[0].length
+      sommatoria = 0;
+      for (var posizione = 0; posizione < array1[0].length; posizione++) {
+        sommatoria = sommatoria + array1[riga1][posizione] * array2[posizione]; //array2[ posizione ][ colonna2 ]
+      }
+      //array3[ riga1 ][ colonna2 ] = sommatoria;
+      array3[riga1] = sommatoria;
+    }
+  }
+
+  /*
+	for( var riga = 0; riga < array3.length; riga++ ) {
+		print3( array3[ riga ] ); 	
+	} 
+	*/
+
+  return array3;
+}
+
+function selezionaRipristinaMarkerPOISiaAttiviSiaStazioniEsistenti() {
+  if (array_markerPOIAttivi.length > 0) {
+    // && array_markerPOINONAttiviEsistenti.length > 0 ) {
+    stato_selezionaRipristinaMarkerPOISiaAttiviSiaStazioniEsistenti = !stato_selezionaRipristinaMarkerPOISiaAttiviSiaStazioniEsistenti;
+
+    if (stato_selezionaRipristinaMarkerPOISiaAttiviSiaStazioniEsistenti == true) {
+      for (var i = 0; i < array_markerPOI.length; i++) {
+        if (
+          array_markerPOIAttivi.indexOf(array_markerPOI[i].options.numeroMarkerInserimento) >= 0 ||
+          array_markerPOINONAttiviEsistenti.indexOf(array_markerPOI[i].options.numeroMarkerInserimento) >= 0
+        ) {
+          //
+        } else {
+          inMappa([array_markerPOI[i]], "invisible");
+        }
+      }
+    } else if (stato_selezionaRipristinaMarkerPOISiaAttiviSiaStazioniEsistenti == false) {
+      inMappa(array_markerPOI, "visible");
+    }
+  } else {
+    print3("No solution identified on map; operation terminated.");
+  }
+}
+
+function attendi(ms) {
+  return new Promise(function(resolve, reject) {
+    var st = setTimeout(function() {
+      resolve("Operation terminated");
+      clearTimeout(st); //return;
+    }, ms);
+  });
+}
+
+function haElementi(array) {
+  var controllo = true;
+  var i = 0;
+  while (i < array.length && controllo == true) {
+    if (mappa.hasLayer(array[i])) {
+      controllo = true;
+    } else {
+      controllo = false;
+    }
+    i++;
+  }
+  return controllo;
+}
+
+///////////////////////////////////////////////////////file_mostraVariabili///////////////////////////////////////////////////////
+
+async function mostraMatricePOI(attributoMarkerPOI) {
+  await Excel.run(async (context) => {
+    sheetVar = context.workbook.worksheets.getItem("Variables");
+    rangeVar = sheetVar.getRange();
+
+    var titoli = [
+      ["numeroMarkerInserimento", "*** INSERTION NUMBER MARKER: "],
+      ["coordinate", "*** MARKER POI COORDINATES [latitude, longitude]: "],
+      ["amenity", "*** AMENITY: "],
+      ["nome", "*** NAME: "],
+      ["tipoMarker", "*** MARKER TYPE: "],
+      ["fattoreImpianto", "*** IMPLANT FACTOR: "],
+      ["sommatoriaFlussi", "*** FLOW SUM (NUMBER OF PEOPLE): "],
+      ["fattorePendolarismo", "*** COMMUTING FACTOR: "],
+      ["costiAttivazioneManutenzione", "*** ACTIVATION AND MAINTENANCE COST MATRIX [Euro]: "]
+    ];
+    var titolo = "";
+    //var res = "";
+    var temp = "";
+
+    if (attributoMarkerPOI == titoli[0][0]) {
+      titolo = titoli[0][1];
+    } else if (attributoMarkerPOI == titoli[1][0]) {
+      titolo = titoli[1][1];
+    } else if (attributoMarkerPOI == titoli[2][0]) {
+      titolo = titoli[2][1];
+    } else if (attributoMarkerPOI == titoli[3][0]) {
+      titolo = titoli[3][1];
+    } else if (attributoMarkerPOI == titoli[4][0]) {
+      titolo = titoli[4][1];
+    } else if (attributoMarkerPOI == titoli[5][0]) {
+      titolo = titoli[5][1];
+    } else if (attributoMarkerPOI == titoli[6][0]) {
+      titolo = titoli[6][1];
+    } else if (attributoMarkerPOI == titoli[7][0]) {
+      titolo = titoli[7][1];
+    } else if (attributoMarkerPOI == titoli[8][0]) {
+      titolo = titoli[8][1];
+    }
+
+    //Intestazione
+    //res = res + titolo + "\n";
+    rangeVar.getRow(rowVar).getColumn(0).values = [[titolo]];
+    rowVar++;
+
+    for (var colonna = 0; colonna < array_markerPOI.length; colonna++) {
+      if (colonna == 0) {
+        //temp = sprintf(" ");
+        //res = res + temp;
+        rangeVar.getRow(rowVar).getColumn(colonna).values = [[" "]];
+      }
+      //temp = sprintf("POI" + colonna); //+ "\t\t";
+      //res = res + temp;
+      rangeVar.getRow(rowVar).getColumn(colonna + 1).values = [["POI" + colonna]];
+    }
+
+    //res = res + "\n";
+    rowVar++;
+
+    for (var colonna = 0; colonna < array_markerPOI.length; colonna++) {
+      if (colonna == 0) {
+        //temp = sprintf("----- ");
+        //res = res + temp;
+        rangeVar.getRow(rowVar).getColumn(colonna).values = [["----- "]];
+      }
+
+      if (attributoMarkerPOI == titoli[0][0]) {
+        temp = sprintf(array_markerPOI[colonna].options.numeroMarkerInserimento); //+ "\t\t";
+      } else if (attributoMarkerPOI == titoli[1][0]) {
+        temp = sprintf(array_markerPOI[colonna].options.coordinate); //+ "\t\t";
+      } else if (attributoMarkerPOI == titoli[2][0]) {
+        temp = sprintf(array_markerPOI[colonna].options.amenity); //+ "\t\t";
+      } else if (attributoMarkerPOI == titoli[3][0]) {
+        temp = sprintf(array_markerPOI[colonna].options.nome); //+ "\t\t";
+      } else if (attributoMarkerPOI == titoli[4][0]) {
+        //temp = sprintf( array_markerPOI[ colonna ].options.tipoMarker ); //+ "\t\t";
+        /*************************************************************************************/
+        if (array_markerPOI[colonna].options.tipoMarker == "clienti") {
+          temp = sprintf("customers"); //+ "\t\t";
+        } else if (array_markerPOI[colonna].options.tipoMarker == "mercatiPOI") {
+          temp = sprintf("marketsPOI"); //+ "\t\t";
+        } else if (array_markerPOI[colonna].options.tipoMarker == "stazioniEsistentiPOI") {
+          temp = sprintf("existingStationsPOI"); //+ "\t\t"; //existingChargingStationsPOI
+        } else if (array_markerPOI[colonna].options.tipoMarker == "parcheggiPOI") {
+          temp = sprintf("parkingAreasPOI"); //+ "\t\t";
+        } else {
+          //Non previsto
+          temp = sprintf(""); //+ "\t\t";
+        }
+        /*************************************************************************************/
+      } else if (attributoMarkerPOI == titoli[5][0]) {
+        temp = sprintf(array_markerPOI[colonna].options.fattoreImpianto); //+ "\t\t";
+      } else if (attributoMarkerPOI == titoli[6][0]) {
+        temp = sprintf(array_markerPOI[colonna].options.sommatoriaFlussi); //+ "\t\t";
+      } else if (attributoMarkerPOI == titoli[7][0]) {
+        temp = sprintf(array_markerPOI[colonna].options.fattorePendolarismo); //+ "\t\t";
+      } else if (attributoMarkerPOI == titoli[8][0]) {
+        temp = sprintf(array_costiAttivazioneManutenzione[colonna].toFixed(2)); //+ "\t\t";
+      }
+
+      //res = res + temp;
+      rangeVar.getRow(rowVar).getColumn(colonna + 1).values = [[temp]];
+    }
+
+    //res = res + "\n";
+    //res = res + "\n";
+    rowVar++;
+
+    rangeVar.format.autofitColumns();
+
+    await context.sync();
+
+    //testo_mostraVariabili = testo_mostraVariabili + res;
+  });
+}
+
+async function mostraVariabili() {
+  await Excel.run(async (context) => {
+    //testo_mostraVariabili = "";
+    //localStorage.setItem("textAreaMostraVariabili", testo_mostraVariabili);
+
+    await initializeExcel("Variables", true);
+
+    sheetVar = context.workbook.worksheets.getItem("Variables");
+    rangeVar = sheetVar.getRange();
+
+    //var res0 = "";
+    //var res1 = "";
+    //var temp = "";
+
+    //Intestazione
+    //res0 = res0 + "*** POI - CUSTOMERS DISTANCE MATRIX [Km]: " + "\n";
+    //console.log( rowVar );
+    rangeVar.getRow(rowVar).getColumn(0).values = [["*** POI - CUSTOMERS DISTANCE MATRIX [Km]: "]];
+    rowVar++;
+
+    for (var colonna = 0; colonna < array_markerPOI.length; colonna++) {
+      if (colonna == 0) {
+        //temp = sprintf(" ");
+        //res0 = res0 + temp;
+        rangeVar.getRow(rowVar).getColumn(colonna).values = [[" "]];
+      }
+      //temp = sprintf("POI" + colonna); //+ "\t\t";
+      //res0 = res0 + temp;
+      rangeVar.getRow(rowVar).getColumn(colonna + 1).values = [["POI" + colonna]];
+    }
+
+    //res0 = res0 + "\n";
+    rowVar++;
+
+    for (var riga = 0; riga < array_markerClienti.length; riga++) {
+      for (var colonna = 0; colonna < array_markerPOI.length; colonna++) {
+        if (colonna == 0) {
+          //temp = sprintf("Customer" + riga); //+ "\t\t";
+          //res0 = res0 + temp;
+          rangeVar.getRow(rowVar).getColumn(colonna).values = [["Customer" + riga]];
+        }
+
+        //temp = sprintf(array_distanzaClientiPOI[riga][colonna].toFixed(3)); //+ "\t\t";
+        //res0 = res0 + temp;
+        rangeVar.getRow(rowVar).getColumn(colonna + 1).values = [[array_distanzaClientiPOI[riga][colonna].toFixed(3)]];
+      }
+      //res0 = res0 + "\n";
+      rowVar++;
+    }
+
+    //res0 = res0 + "\n";
+    //res0 = res0 + "\n";
+
+    rowVar++;
+
+    //testo_mostraVariabili = testo_mostraVariabili + res0;
+
+    await context.sync();
+
+    //Intestazione
+    //res1 = res1 + "*** AFFERENT / TRANSPORT / CONNECTION / MEMBERSHIP COST MATRIX [Euro]: " + "\n";
+    rangeVar.getRow(rowVar).getColumn(0).values = [
+      ["*** AFFERENT / TRANSPORT / CONNECTION / MEMBERSHIP COST MATRIX [Euro]: "]
+    ];
+
+    rowVar++;
+
+    for (var colonna = 0; colonna < array_markerPOI.length; colonna++) {
+      if (colonna == 0) {
+        //res1 = res1 + "\t\t";
+        //temp = sprintf(" ");
+        //res1 = res1 + temp;
+        rangeVar.getRow(rowVar).getColumn(colonna).values = [[" "]];
+      }
+      //temp = sprintf("POI" + colonna); //+ "\t\t";
+      //res1 = res1 + temp;
+      rangeVar.getRow(rowVar).getColumn(colonna + 1).values = [["POI" + colonna]];
+    }
+
+    //res1 = res1 + "\n";
+    rowVar++;
+
+    for (var riga = 0; riga < array_markerClienti.length; riga++) {
+      for (var colonna = 0; colonna < array_markerPOI.length; colonna++) {
+        if (colonna == 0) {
+          //temp = sprintf("Customer" + riga); //+ "\t\t";
+          //res1 = res1 + temp;
+          rangeVar.getRow(rowVar).getColumn(colonna).values = [["Customer" + riga]];
+        }
+
+        //temp = sprintf(array_costiAfferenza[riga][colonna].toFixed(2)); //+ "\t\t";
+        //res1 = res1 + temp;
+        rangeVar.getRow(rowVar).getColumn(colonna + 1).values = [[array_costiAfferenza[riga][colonna].toFixed(2)]];
+      }
+      //res1 = res1 + "\n";
+      rowVar++;
+    }
+
+    //res1 = res1 + "\n";
+    //res1 = res1 + "\n";
+    rowVar++;
+
+    //testo_mostraVariabili = testo_mostraVariabili + res1;
+
+    await context.sync();
+
+    mostraMatricePOI("costiAttivazioneManutenzione");
+    mostraMatricePOI("numeroMarkerInserimento");
+    mostraMatricePOI("coordinate");
+    mostraMatricePOI("amenity");
+    mostraMatricePOI("tipoMarker");
+    mostraMatricePOI("fattoreImpianto");
+    mostraMatricePOI("sommatoriaFlussi");
+    mostraMatricePOI("fattorePendolarismo");
+
+    await context.sync();
+
+    //localStorage.setItem("textAreaMostraVariabili", testo_mostraVariabili);
+    //window.open("file_mostraVariabili.html", "file_mostraVariabili", "width=1000,height=450");
+  });
+}
+
+///////////////////////////////////////////////////////AVVIO WEBAPP///////////////////////////////////////////////////////
+
+primoAvvio();
+
+eventiSullaMappa();
+
+gestioneSchede("schedaInput");
+
+initializeWorkBook();
+
+//test();
+
+async function initializeWorkBook() {
+  primaAperturaExcel = true;
+  await initializeExcel("Variables", true);
+  await initializeExcel("Sensitivity Analysis - Du Aloc", true);
+  await initializeExcel("Sensitivity Analysis - SPLA", true);
+  primaAperturaExcel = false;
+}
+
+async function initializeExcel(sheetName, clearSheet) {
+  await Excel.run(async (context) => {
+    var sheet = context.workbook.worksheets.getItem(sheetName);
+    var range = sheet.getRange();
+
+    if (clearSheet == true) {
+      range.clear();
+    }
+
+    await context.sync();
+    range.format.columnWidth = 60;
+    //range.format.autofitColumns();
+    await context.sync();
+
+    if (sheetName == "Variables") {
+      range.getRow(0).getColumn(0).values = [
+        ["Variables / values of Customer Markers and POI Marker (press 'VARIABLES' button on Web Page)"]
+      ]; //sovrascrittura valore cella
+    }
+
+    if (sheetName == "Sensitivity Analysis - Du Aloc" || sheetName == "Sensitivity Analysis - SPLA") {
+      if (sheetName == "Sensitivity Analysis - Du Aloc") {
+        range.getRow(0).getColumn(0).values = [["Sensitivity Analysis - Du Aloc Algorithm"]];
+      } else if (sheetName == "Sensitivity Analysis - SPLA") {
+        range.getRow(0).getColumn(0).values = [["Sensitivity Analysis - Simple Plant Location Algorithm"]];
+      }
+
+      range.getRow(3).getColumn(4).values = [["Minimum"]];
+      range.getRow(3).getColumn(5).values = [["Maximum"]];
+
+      range.getRow(4).getColumn(0).values = [["Parameter 0: Number of customers"]];
+      range.getRow(5).getColumn(0).values = [["Parameter 1: Cost per Km for electric car"]];
+      range.getRow(6).getColumn(0).values = [["Parameter 2: Cost of existing station"]];
+      range.getRow(7).getColumn(0).values = [["Parameter 3: Cost of newly - built station"]];
+      range.getRow(8).getColumn(0).values = [["Parameter 4: Factor marketsPOI"]];
+      range.getRow(9).getColumn(0).values = [["Parameter 5: Factor existingStationPOI"]];
+      range.getRow(10).getColumn(0).values = [["Parameter 6: Factor parkingAreaPOI"]];
+
+      if (primaAperturaExcel == true) {
+        //Minimum
+        range.getRow(4).getColumn(4).values = [["3400"]];
+        range.getRow(5).getColumn(4).values = [["0.40"]];
+        range.getRow(6).getColumn(4).values = [["110.00"]];
+        range.getRow(7).getColumn(4).values = [["1000.00"]];
+        range.getRow(8).getColumn(4).values = [["0.30"]];
+        range.getRow(9).getColumn(4).values = [["0.50"]];
+        range.getRow(10).getColumn(4).values = [["0.25"]];
+      }
+
+      sheet.getRange("E5:E11").format.fill.color = "#d1ffbd";
+
+      if (primaAperturaExcel == true) {
+        //Maximum
+        range.getRow(4).getColumn(5).values = [["3600"]];
+        range.getRow(5).getColumn(5).values = [["0.60"]];
+        range.getRow(6).getColumn(5).values = [["130.00"]];
+        range.getRow(7).getColumn(5).values = [["1400.00"]];
+        range.getRow(8).getColumn(5).values = [["0.50"]];
+        range.getRow(9).getColumn(5).values = [["1.50"]];
+        range.getRow(10).getColumn(5).values = [["0.75"]];
+      }
+
+      sheet.getRange("F5:F11").format.fill.color = "#fcc7c3";
+
+      range.getRow(12).getColumn(0).values = [["Number of combination exprected: 3^7 = 2187"]];
+
+      if (sheetName == "Sensitivity Analysis - Du Aloc") {
+        range.getRow(12).getColumn(0).values = [["Sensitivity Analysis with Du Aloc Algorithm - combinations:"]];
+      } else if (sheetName == "Sensitivity Analysis - SPLA") {
+        range.getRow(12).getColumn(0).values = [
+          ["Sensitivity Analysis with Simple Plant Location Algorithm - combinations:"]
+        ];
+      }
+
+      range.getRow(16).getColumn(0).values = [["Number\nCustomers"]];
+      range.getRow(16).getColumn(1).values = [["Cost Km\nelectric\ncar"]];
+      range.getRow(16).getColumn(2).values = [["Cost\nexisting\nstations"]];
+      range.getRow(16).getColumn(3).values = [["Cost\nnewly -\nbuilt\nstation"]];
+      range.getRow(16).getColumn(4).values = [["Factor\nmarkets\nPOI"]];
+      range.getRow(16).getColumn(5).values = [["Factor\nexisting\nstation\nPOI"]];
+      range.getRow(16).getColumn(6).values = [["Factor\nparking\nArea\nPOI"]];
+      range.getRow(16).getColumn(7).values = [["Minimum\ncost"]];
+    }
+
+    if (sheetName == "Variables") {
+      rowVar = 0;
+    } else if (sheetName == "Sensitivity Analysis - Du Aloc") {
+      rowSADuAloc = 17;
+    } else if (sheetName == "Sensitivity Analysis - SPLA") {
+      rowSASPLA = 17;
+    }
+
+    await context.sync();
+  });
+}
+
+async function appoggioSens(sheetName) {
+  await Excel.run(async (context) => {
+    if (array_markerClienti.length == 0) {
+      print3("The number of Customer Markers identified on the map is equal to 0; operation terminated.");
+      //stato_calcoloCostoMinimo = false;
+      //terminaOperazione = false;
+      return;
+    }
+
+    if (array_markerPOI.length == 0) {
+      print3("The number of POI Markers identified on the map is equal to 0; operation terminated");
+      //stato_calcoloCostoMinimo = false;
+      //terminaOperazione = false;
+      return;
+    }
+
+    print3("Wait ... ");
+
+    //sheetSADuAloc ; sheetSASPLA
+    //rangeSADuAloc ; rangeSASPLA
+
+    var sheet;
+    var range;
+    var row;
+
+    if (sheetName == "Sensitivity Analysis - Du Aloc") {
+      sheet = context.workbook.worksheets.getItem("Sensitivity Analysis - Du Aloc");
+      await initializeExcel("Sensitivity Analysis - Du Aloc", false);
+      row = rowSADuAloc; //17
+    } else if (sheetName == "Sensitivity Analysis - SPLA") {
+      sheet = context.workbook.worksheets.getItem("Sensitivity Analysis - SPLA");
+      await initializeExcel("Sensitivity Analysis - SPLA", false);
+      row = rowSASPLA; //17
+    }
+
+    range = sheet.getRange();
+
+    await context.sync();
+
+    //Minimum
+    var minRif = [];
+
+    var rangeMin = sheet.getRange("E5:E11");
+    rangeMin.load("values");
+    await context.sync();
+    //console.log(rangeMin.values );
+
+    for (var i = 0; i < 7; i++) {
+      minRif.push(rangeMin.values[i][0]);
+    }
+
+    //Maximum
+    var maxRif = [];
+
+    var rangeMax = sheet.getRange("F5:F11");
+    rangeMax.load("values");
+    await context.sync();
+    //console.log(rangeMax.values );
+
+    for (var i = 0; i < 7; i++) {
+      maxRif.push(rangeMax.values[i][0]);
+    }
+
+    sheet.getRange("A15:E15").format.fill.color = "#ffffe0";
+    range.getRow(14).getColumn(0).values = [[""]];
+
+    var initial_numeroClientiPerComunita = numeroClientiPerComunita;
+    var initial_euroSpesiPerChilometroAutoElettrica = euroSpesiPerChilometroAutoElettrica;
+    var initial_costoAttivazioneManutenzioneImpianto1 = costoAttivazioneManutenzioneImpianto1;
+    var initial_costoAttivazioneManutenzioneImpianto2 = costoAttivazioneManutenzioneImpianto2;
+    var initial_fattoreImpiantoMercatiPOI = fattoreImpiantoMercatiPOI;
+    var initial_fattoreImpiantostazioniEsistentiPOI = fattoreImpiantostazioniEsistentiPOI;
+    var initial_fattoreImpiantoParcheggiPOI = fattoreImpiantoParcheggiPOI;
+
+    var cont0 = 0;
+    var cont1 = 0;
+    var cont2 = 0;
+    var cont3 = 0;
+    var cont4 = 0;
+    var cont5 = 0;
+    var cont6 = 0;
+
+    var par0 = 0;
+    var par1 = 0;
+    var par2 = 0;
+    var par3 = 0;
+    var par4 = 0;
+    var par5 = 0;
+    var par6 = 0;
+
+    var minCostSA = Number.POSITIVE_INFINITY;
+    var combValue;
+
+    var iteration = 0;
+
+    for (cont0 = 0, par0 = minRif[0]; cont0 < 3; cont0++, par0 = par0 + Math.abs(maxRif[0] - minRif[0]) / 2.0) {
+      for (cont1 = 0, par1 = minRif[1]; cont1 < 3; cont1++, par1 = par1 + Math.abs(maxRif[1] - minRif[1]) / 2.0) {
+        for (cont2 = 0, par2 = minRif[2]; cont2 < 3; cont2++, par2 = par2 + Math.abs(maxRif[2] - minRif[2]) / 2.0) {
+          for (cont3 = 0, par3 = minRif[3]; cont3 < 3; cont3++, par3 = par3 + Math.abs(maxRif[3] - minRif[3]) / 2.0) {
+            for (cont4 = 0, par4 = minRif[4]; cont4 < 3; cont4++, par4 = par4 + Math.abs(maxRif[4] - minRif[4]) / 2.0) {
+              for (
+                cont5 = 0, par5 = minRif[5];
+                cont5 < 3;
+                cont5++, par5 = par5 + Math.abs(maxRif[5] - minRif[5]) / 2.0
+              ) {
+                for (
+                  cont6 = 0, par6 = minRif[6];
+                  cont6 < 3;
+                  cont6++, par6 = par6 + Math.abs(maxRif[6] - minRif[6]) / 2.0
+                ) {
+                  iteration++;
+
+                  numeroClientiPerComunita = par0;
+                  euroSpesiPerChilometroAutoElettrica = par1;
+                  costoAttivazioneManutenzioneImpianto1 = par2;
+                  costoAttivazioneManutenzioneImpianto2 = par3;
+                  fattoreImpiantoMercatiPOI = par4;
+                  fattoreImpiantostazioniEsistentiPOI = par5;
+                  fattoreImpiantoParcheggiPOI = par6;
+
+                  aggiornaArrayMarkerPOI();
+
+                  calcolaMatriciDiCosti();
+
+                  range.getRow(row).getColumn(0).values = [[par0]];
+                  range.getRow(row).getColumn(1).values = [[par1]];
+                  range.getRow(row).getColumn(2).values = [[par2]];
+                  range.getRow(row).getColumn(3).values = [[par3]];
+                  range.getRow(row).getColumn(4).values = [[par4]];
+                  range.getRow(row).getColumn(5).values = [[par5]];
+                  range.getRow(row).getColumn(6).values = [[par6]];
+
+                  if (sheetName == "Sensitivity Analysis - Du Aloc") {
+                    combValue = await calcolaCostoMinimoDuAloc(false);
+                  } else if (sheetName == "Sensitivity Analysis - SPLA") {
+                    await calcolaCostoMinimoSimplePlantLocation(false);
+                    combValue = costoMinimoPerPOI;
+                  }
+
+                  if (combValue < minCostSA) {
+                    minCostSA = combValue;
+                  }
+
+                  range.getRow(row).getColumn(7).values = [[combValue.toFixed(2)]];
+
+                  row++;
+
+                  if (iteration % 100 == 0) {
+                    range.getRow(14).getColumn(0).values = [["Processing ... (" + iteration + "/2187 combinations)"]];
+                    await context.sync();
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (sheetName == "Sensitivity Analysis - Du Aloc") {
+      print3("*** SENSITIVITY ANALYSIS - DU ALOC ALGORITHM *** ");
+
+      range.getRow(14).getColumn(0).values = [["MINIMUM VALUE DETECTED [Euro]: " + minCostSA.toFixed(2)]];
+      print3("MINIMUM VALUE DETECTED [Euro]: " + minCostSA.toFixed(2));
+    } else if (sheetName == "Sensitivity Analysis - SPLA") {
+      print3("*** SENSITIVITY ANALYSIS - SIMPLE PLANT LOCATION ALGORITHM *** ");
+
+      range.getRow(14).getColumn(0).values = [
+        ["MINIMUM VALUE DETECTED for solution n.2 [Euro]: " + minCostSA.toFixed(2)]
+      ];
+      print3("MINIMUM VALUE DETECTED for solution n.2 [Euro]: " + minCostSA.toFixed(2));
+    }
+
+    sheet.getRange("A15:E15").format.fill.color = "#ffffe0";
+    //range.getRow(14).getColumn(0).format.fill.color = "#ffffe0";
+
+    numeroClientiPerComunita = initial_numeroClientiPerComunita;
+    euroSpesiPerChilometroAutoElettrica = initial_euroSpesiPerChilometroAutoElettrica;
+    costoAttivazioneManutenzioneImpianto1 = initial_costoAttivazioneManutenzioneImpianto1;
+    costoAttivazioneManutenzioneImpianto2 = initial_costoAttivazioneManutenzioneImpianto2;
+    fattoreImpiantoMercatiPOI = initial_fattoreImpiantoMercatiPOI;
+    fattoreImpiantostazioniEsistentiPOI = initial_fattoreImpiantostazioniEsistentiPOI;
+    fattoreImpiantoParcheggiPOI = initial_fattoreImpiantoParcheggiPOI;
+
+    aggiornaArrayMarkerPOI();
+
+    calcolaMatriciDiCosti();
+
+    mostraVariabili();
+
+    await context.sync();
+  });
+}
+
+async function calcolaSADuAloc() {
+  await Excel.run(async (context) => {
+    appoggioSens("Sensitivity Analysis - Du Aloc");
+    //await context.sync();
+  });
+}
+
+async function calcolaSASPLA() {
+  await Excel.run(async (context) => {
+    appoggioSens("Sensitivity Analysis - SPLA");
+    //await context.sync();
+  });
+}
+
+//TEST ...
+
+//document.getElementById("run").addEventListener("click", () => tryCatch(run));
+
+async function test() {
+  await Excel.run(async (context) => {
+    //const cell = context.workbook.worksheets.getActiveWorksheet().getRange("A1:B2");
+    try {
+      var sheetVariables = context.workbook.worksheets.getItem("Variables");
+      var range = sheetVariables.getRange();
+      range.getRow(1).getColumn(1).values = [[999]];
+    } catch (err) {
+      //console.log(err);
+    }
+    //"A1:A1"
+    //range.values = [[12]];
+    //cell.format.fill.color = "#00ffcc";
+
+    await context.sync();
+  });
+}
+
+/** Default helper for invoking an action and handling errors. */
+/*
+async function tryCatch(callback) {
+  try {
+    await callback();
+  } catch (error) {
+    // Note: In a production add-in, you'd want to notify the user through your add-in's UI.
+    console.error(error);
+  }
+}
+*/
+language: javascript
+template:
+content: |-
+<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests" />
+
+<div id="parteSinistra">
+
+	<div id="mappa">
+	</div>
+
+	<div id="coordinateValoriImpostazioni">
+
+		<div id="coordinateValori">
+
+			<div id="coordinate">
+				<hr />
+				<label id="label_coordinate">Latitude, longitude, zoom:</label>
+			</div>
+
+			<div id="valori">
+				<hr />
+				<button type="button" onclick="mostraVariabili()" id="button_mostraVariabili">VARIABLES</button> -
+				<button type="button" onclick="calcolaDistanzaSullaMappa()" id="button_calcolaDistanzaSullaMappa">DISTANCE</button>
+				<button type="button" onclick="rimuoviCalcolaDistanzaSullaMappa()" id="button_rimuoviCalcolaDistanzaSullaMappa">Remove</button>
+				-
+				<button type="button" onclick="calcolaAreaSullaMappa()" id="button_calcolaAreaSullaMappa">AREA</button>
+				<button type="button" onclick="rimuoviCalcolaAreaSullaMappa()" id="button_rimuoviCalcolaAreaSullaMappa">Remove</button>
+
+			</div>
+
+		</div>
+
+		<div id="impostazioni">
+
+			<!-- <hr /> -->
+			<label id="label_mappaDiBaseTipoDistanza">Base map (tileLayer):
+				<input type="radio" id="mappaDiBase01" value="mappaDiBase01" name="mappaDiBase" onchange="cambiaMappaDiBase()" style="height:15px; width:15px;" checked="checked" />OpenStreetMap
+				<input type="radio" id="mappaDiBase02" value="mappaDiBase02" name="mappaDiBase" onchange="cambiaMappaDiBase()" style="height:15px; width:15px;" />CyclOSM
+				<input type="radio" id="mappaDiBase03" value="mappaDiBase03" name="mappaDiBase" onchange="cambiaMappaDiBase()" style="height:15px; width:15px;" />WorldTopoMap
+				<input type="radio" id="mappaDiBase04" value="mappaDiBase04" name="mappaDiBase" onchange="cambiaMappaDiBase()" style="height:15px; width:15px;" />WorldImagery
+				
+				- Type of distance:
+				<input type="radio" id="tipoDistanza01" value="tipoDistanza01" name="tipoDistanza" onchange=" tipoDistanza = 'Euclidea'; calcolaMatriciDiCosti(); if(array_markerClienti.length>0 && array_markerPOI.length>0){mostraVariabili();}; " style="height:15px; width:15px;" checked="checked" />Euclidean
+				<input type="radio" id="tipoDistanza02" value="tipoDistanza02" name="tipoDistanza" onchange=" tipoDistanza = 'Manhattan'; calcolaMatriciDiCosti(); if(array_markerClienti.length>0 && array_markerPOI.length>0){mostraVariabili();}; " style="height:15px; width:15px;" />Manhattan
+				</label>
+
+		</div>
+
+	</div>
+
+	<div id="console">
+		<hr />
+		<!-- <label id="label_console"></label> -->
+		<button type="button" onclick="clearConsole1()" id="btn_clearConsole1">Clear Console</button>
+		<textarea readonly rows="37" id="textArea" ></textarea>
+
+	</div>
+
+</div>
+
+<div id="parteDestra" style="overflow-y: scroll;">
+
+	<div class="tab">
+		<button id="button_schedaInput" class="tabSingolo" onclick="gestioneSchede( 'schedaInput' )">INITIAL DATA</button>
+		<button id="button_schedaColonnine" class="tabSingolo" onclick="gestioneSchede( 'schedaColonnine' )">CHARGE COLUMNS LOCALIZATION</button>
+		<button id="button_schedaPercorso"  class="tabSingolo" onclick="gestioneSchede( 'schedaPercorso' )">ROUTE SEARCH</button>
+	</div>
+
+	<hr />
+
+	<div id="schedaInput">
+
+		<label id="label_titoloRicercaPercorso">::: INITIAL DATA :::</label>
+		<br/>
+
+		<label id="label_trovaMarkerSullaMappa">Search on map, through Overpass Turbo query, of potential Customers and possible locations of charging stations, the latter called Plant or POI (Points Of Interest, i.e. markets, existing charging stations, car parks):</label>
+		<button type="button" onclick="trovaMarkerSullaMappa();">Marker Search on map</button>
+		<button type="button" onclick="rimuoviMarkerSullaMappa()">
+			Removing of Customer and Plant / POI Markers
+		</button>
+		<br/>
+
+		<hr />
+		<label id="label_flussiPendolarismo">Processing of commuting flows:
+			<button type="button"><label for="input_file" id="label_inputFile" ><input type="file" id="input_file" style="display:none" onchange="loadFile(this.files[0])" />Select a *.csv file</label></button>
+		<button type="button" onclick="ripristinoFattorePendolarismo()" id="button_ripristinoFattorePendolarismo">Default Commuting Factor</button>
+		</label>
+
+		<hr />
+
+		<label id="label_DatiRisultati">Data used:</label>
+
+		<label id="label_numeroClientiPerComunita">- Number of customers per community or per individual Customer Marker [customers]: 
+			<input class="inputEditabile" type="text" onblur="if( isNaN( this.value ) ) { this.value = 3500; } else { numeroClientiPerComunita= parseFloat(this.value, 10); calcolaMatriciDiCosti(); }; if(array_markerClienti.length>0 && array_markerPOI.length>0){mostraVariabili();}; " 
+				id="numeroClientiPerComunita" size="10" />
+		</label>
+
+		<label id="label_euroSpesiPerChilometroAutoElettrica">- Cost per km for electric car / Euro spent per kilometer (electric car) [€/Km]: 
+			<input class="inputEditabile" type="text" onblur="if( isNaN( this.value ) ) { this.value = 0.50; } else { euroSpesiPerChilometroAutoElettrica= parseFloat(this.value, 10); calcolaMatriciDiCosti(); }; if(array_markerClienti.length>0 && array_markerPOI.length>0){mostraVariabili();}; " 
+				id="euroSpesiPerChilometroAutoElettrica" size="10"  />
+		</label>
+
+		<label id="label_costoAttivazioneManutenzioneImpianto1">- Cost of activation and maintenance of existing station [€]: 
+			<input class="inputEditabile" type="text" onblur="if( isNaN( this.value ) ) { this.value = 120.00; } else { costoAttivazioneManutenzioneImpianto1= parseFloat(this.value, 10); calcolaMatriciDiCosti(); }; if(array_markerClienti.length>0 && array_markerPOI.length>0){mostraVariabili();}; " 
+				id="costoAttivazioneManutenzioneImpianto1" size="10" />
+		</label>
+
+		<label id="label_costoAttivazioneManutenzioneImpianto2">- Cost of activation and maintenance of newly - built station [€]: 
+			<input class="inputEditabile" type="text" onblur="if( isNaN( this.value ) ) { this.value = 1200.00; } else { costoAttivazioneManutenzioneImpianto2= parseFloat(this.value, 10); calcolaMatriciDiCosti(); }; if(array_markerClienti.length>0 && array_markerPOI.length>0){mostraVariabili();}; " 
+				id="costoAttivazioneManutenzioneImpianto2" size="10"  />
+		</label>
+
+		<label id="label_fattoreImpianto">- Plant Factor <br/>
+			   * marketsPOI: 
+			<input class="inputEditabile" type="text" onblur="if( isNaN( this.value ) ) { this.value = 0.40; } else { fattoreImpiantoMercatiPOI= parseFloat(this.value, 10); aggiornaArrayMarkerPOI(); calcolaMatriciDiCosti(); }; if(array_markerClienti.length>0 && array_markerPOI.length>0){mostraVariabili();}; " 
+				id="fattoreImpiantoMercatiPOI" size="2"  /> <br/>
+			   * existingChargingStationsPOI:
+			<input class="inputEditabile" type="text" onblur="if( isNaN( this.value ) ) { this.value = 1.00; } else { fattoreImpiantostazioniEsistentiPOI= parseFloat(this.value, 10); aggiornaArrayMarkerPOI(); calcolaMatriciDiCosti(); }; if(array_markerClienti.length>0 && array_markerPOI.length>0){mostraVariabili();}; " 
+				id="fattoreImpiantostazioniEsistentiPOI" size="2"  /> <br/>
+			   * parkingAreasPOI: 
+			<input class="inputEditabile" type="text" onblur="if( isNaN( this.value ) ) { this.value = 0.50; } else { fattoreImpiantoParcheggiPOI= parseFloat(this.value, 10); aggiornaArrayMarkerPOI(); calcolaMatriciDiCosti(); }; if(array_markerClienti.length>0 && array_markerPOI.length>0){mostraVariabili();}; " 
+				id="fattoreImpiantoParcheggiPOI" size="2"  />
+		</label>
+
+		<label id="label_areaInMappa">- Area [Km^2]: <input readonly type="text" onclick="" id="areaInMappa" size="20" /></label>
+		<label id="label_densitaAbitativa">- Housing density [inhabitants / km^2]: <input readonly type="text" onclick="" id="densitaAbitativa" size="40" /></label>
+
+		<hr />
+
+		<label id="label_metodologiaAHP" >AHP (Analytic Hierarchy Process) Methodology: </label>
+		<label id="label_matriceConfrontiAHP" >- Comparison Matrix between Criteria, where, among the POI Markers, I consider: </label>
+
+		<table class="legendaMatriceAHP">
+			<tr>
+				<td>* Dist: shortest distance; </td>
+				<td>* Catt: lowest activation / maintenance cost; </td>
+			</tr>
+			<tr>
+				<td>* Ctot: lowest total cost; </td>
+				<td>* ImpIct: lowest implant / plant factor. </td>
+			</tr>
+		</table>
+
+		<table class="matriceAHP">
+			<tr>
+				<td></td>
+				<td>Dist</td>
+				<td>Catt</td>
+				<td>Ctot</td>
+				<td>ImpIct</td>
+			</tr>
+
+			<tr>
+				<td>Dist</td>
+				<td> <input readonly class="inputEditabile" type="number" min="1.0" max="9.0"
+					onblur=""
+					value = "1" id="punteggioAHP00" style="width: 60px"  />
+			</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[0][1]=parseFloat( eval( this.value ), 10); document.getElementById( 'punteggioAHP10' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[0][1] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) );
+					array_punteggioAHP[1][0]=parseFloat( eval( document.getElementById( 'punteggioAHP10' ).value ), 10); "
+				id="punteggioAHP01" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+				</select>
+				</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[0][2]=parseFloat( eval( this.value ),  10); document.getElementById( 'punteggioAHP20' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[0][2] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) );
+					array_punteggioAHP[2][0]=parseFloat( eval( document.getElementById( 'punteggioAHP20' ).value ), 10); "
+				id="punteggioAHP02" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+				</select>
+				</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[0][3]=parseFloat( eval( this.value ), 10); document.getElementById( 'punteggioAHP30' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[0][3] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) ); 
+					array_punteggioAHP[3][0]=parseFloat( eval( document.getElementById( 'punteggioAHP30' ).value ), 10); "
+				id="punteggioAHP03" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+				</select>
+				</td>
+			</tr>
+			<tr>
+				<td>Catt</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[1][0]=parseFloat( eval( this.value ), 10); document.getElementById( 'punteggioAHP01' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[1][0] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) ); 
+					array_punteggioAHP[0][1]=parseFloat( eval( document.getElementById( 'punteggioAHP01' ).value ), 10); "
+				id="punteggioAHP10" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+			</select>
+				</td>
+				<td> <input readonly class="inputEditabile" type="number" min="1.0" max="9.0"
+					onblur=""
+					value = "1" id="punteggioAHP11" style="width: 60px"  />
+			</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[1][2]=parseFloat( eval( this.value ), 10); document.getElementById( 'punteggioAHP21' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[1][2] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) ); 
+					array_punteggioAHP[2][1]=parseFloat( eval( document.getElementById( 'punteggioAHP21' ).value ), 10); "
+				id="punteggioAHP12" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+				</select>
+				</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[1][3]=parseFloat( eval( this.value ), 10); document.getElementById( 'punteggioAHP31' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[1][3] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) ); 
+					array_punteggioAHP[3][1]=parseFloat( eval( document.getElementById( 'punteggioAHP31' ).value ), 10); "
+				id="punteggioAHP13" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+				</select>
+				</td>
+			</tr>
+			<tr>
+				<td>Ctot</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[2][0]=parseFloat( eval( this.value ), 10); document.getElementById( 'punteggioAHP02' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[2][0] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) );
+					array_punteggioAHP[0][2]=parseFloat( eval( document.getElementById( 'punteggioAHP02' ).value ), 10); "
+				id="punteggioAHP20" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+				</select>
+				</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[2][1]=parseFloat( eval( this.value ), 10); document.getElementById( 'punteggioAHP12' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[2][1] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) ); 
+					array_punteggioAHP[1][2]=parseFloat( eval( document.getElementById( 'punteggioAHP12' ).value ), 10); "
+				id="punteggioAHP21" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+				</select>
+				</td>
+				<td> <input readonly class="inputEditabile" type="number" min="1.0" max="9.0"
+					onblur=""
+					value = "1" id="punteggioAHP22" style="width: 60px"  />
+			</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[2][3]=parseFloat( eval( this.value ), 10); document.getElementById( 'punteggioAHP32' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[2][3] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) ); 
+					array_punteggioAHP[3][2]=parseFloat( eval( document.getElementById( 'punteggioAHP32' ).value ), 10); "
+				id="punteggioAHP23" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+				</select>
+				</td>
+			</tr>
+			<tr>
+				<td>ImpIct</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[3][0]=parseFloat( eval( this.value ), 10); document.getElementById( 'punteggioAHP03' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[3][0] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) ); 
+					array_punteggioAHP[0][3]=parseFloat( eval( document.getElementById( 'punteggioAHP03' ).value ), 10); "
+				id="punteggioAHP30" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+				</select>
+				</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[3][1]=parseFloat( eval( this.value ), 10); document.getElementById( 'punteggioAHP13' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[3][1] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) ); 
+					array_punteggioAHP[1][3]=parseFloat( eval( document.getElementById( 'punteggioAHP13' ).value ), 10); "
+				id="punteggioAHP31" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+				</select>
+				</td>
+				<td>
+					<select class="inputEditabile"
+				onchange = "array_punteggioAHP[3][2]=parseFloat( eval( this.value ), 10); document.getElementById( 'punteggioAHP23' ).value = 
+					( this.value == '1' ? '1' : ( array_punteggioAHP[3][2] > 1.0 ?  '1/' + this.value : this.value[ this.value.length - 1 ] ) ); 
+					array_punteggioAHP[2][3]=parseFloat( eval( document.getElementById( 'punteggioAHP23' ).value ), 10); "
+				id="punteggioAHP32" style="width: 60px" />
+	  				<option value="1" selected="selected" >1</option>
+	  				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+	  				<option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+	  				<option value="1/2">1/2</option><option value="1/3">1/3</option><option value="1/4">1/4</option><option value="1/5">1/5</option>
+	  				<option value="1/6">1/6</option><option value="1/7">1/7</option><option value="1/8">1/8</option><option value="1/9">1/9</option>
+				</select>
+				</td>
+				<td> <input readonly class="inputEditabile" type="number" min="1.0" max="9.0"
+					onblur=""
+					value = "1" id="punteggioAHP33" style="width: 60px"  />
+			</td>
+
+			</tr>
+		</table>
+
+		<label id="label_mediaMatriceAHP">- type of mean adopted: 
+			<select class="inputEditabile"  
+				onchange = "( this.value == 'aritmetica' ? tipologiaMediaMatriceAHP = 'aritmetica' : tipologiaMediaMatriceAHP = 'geometrica' )" 
+				id="select_mediaMatriceAHP" style="width: 120px" /> 
+		  			<option value="aritmetica" selected="selected" >Arithmetic</option>
+		  			<option value="geometrica">Geometric</option>
+			</select>  
+		</label>
+
+		<label id="label_variazioneTurfDistanzaMarkerClienti">- expected distance from Customer Markers (or community):<input readonly type="text" onclick="" id="variazioneTurfDistanzaMarkerClienti" value="0.000" style="width:50px" />Km
+			<input type="range" min="0" max="10000" value="0" id="range_variazioneTurfDistanzaMarkerClienti" 
+				oninput = "variazioneTurfDistanzaMarkerClienti()" 
+				onchange = "if( array_markerClienti.length == 0 ) { print2( 'No Customer Markers identified on map; operation interrupted. '); }"
+				style="width:100%" /> 
+		</label>
+
+		<!--<br/>-->
+		<button type="button" onclick="clearConsole2()" id="btn_clearConsole2">Clear Console</button>
+		<button type="button" onclick="elaboraMatriceAHP()" id="button_elaboraMatriceAHP">Matrix Processing</button>
+		<button type="button" onclick="ripristinaMatriceAHP()" id="button_ripristinaMatriceAHP">Default Matrix</button>
+		<!--<br/>-->
+		<textarea readonly rows="26" id="textAreaAHP" ></textarea>
+
+	</div>
+
+	<div id="schedaColonnine">
+
+		<label id="label_titoloRicercaColonnine">::: ELECTRIC CHARGE COLUMNS LOCALIZATION :::</label>
+		<br/>
+
+		<label id="label_costoMinimoPerCombinazioni">Calculation of the minimum cost evaluating the following alternatives: </label>
+
+		<button type="button" onclick="calcolaCostoMinimoDuAloc( true )" id="button_costoMinimoLowerBound" style="width:49%" >
+		- Lower Bound verification using Du-Aloc Algorithm </button>
+
+		<button type="button" onclick="calcolaCostoMinimoSimplePlantLocation( true )" id="button_costoMinimoSimplePlantLocation"  style="width:49%" >
+		- Simple Plant Location algorithm<br/>   </button>
+
+		<hr />
+
+		<select class="inputEditabile" id="select_varianteGreedy"
+			onchange =
+				"if( this.value == 'combinazioneMarker' ) { 
+					varianteGreedy = 'combinazioneMarker'; 
+				} else if( this.value == 'markerAttivi' ) { 
+					varianteGreedy = 'markerAttivi'; 
+				} else {
+					varianteGreedy = '';
+				}";
+			style="width:49%;" >
+			<option value="-1" selected="selected" >Greedy option related to the studying ...</option>
+			<option value="combinazioneMarker" >- of Markers combinations</option>
+			<option value="markerAttivi" >- of potentially active Markers</option>
+		</select>
+
+		<button type="button" onclick="calcolaCostoMinimoPerGreedy()" id="button_costoMinimoPerGreedy"  style="width:49%" >
+		- Greedy algorithm </button>
+
+		<hr />
+
+		<button type="button" onclick="calcolaCostoMinimoPerCombinazioni()" id="button_costoMinimoPerCombinazioni"  style="width:49%" >
+		- Combination of assigned POI Marker Number </button>
+
+		<button type="button" onclick="calcolaCostoMinimoPerCombinazioniMarkerPOIAttivi()" id="button_costoMinimoPerCombinazioniBinarie"  style="width:49%" >
+		- Combination of Active/Inactive POI Marker </button>
+
+		<hr />
+
+		<button type="button"
+			onclick="stato_calcoloCostoMinimo = true; calcolaMetodologiaAHP(); stato_calcoloCostoMinimo = false; "
+			id="button_calcolaMetodologiaAHP"  style="width:49%" >
+		- AHP Methodology</button>
+
+		<select class="inputEditabile" id="select_risultatiMarkerClienteAHP"
+			onchange = "risultatiCalcolaMetodologiaAHP()"
+			style="width:49%; overflow-y: scroll; " >
+			<option value="-1" selected="selected" >Results obtained from ...</option>
+		</select>
+
+		<hr />
+
+		<button type="button" onclick="rimuoviCostoMinimoAlgoritmi( true, false )" id="button_rimuoviCostoMinimoAlgoritmi" style="width:49%"  >Removing elements associated with cost calculation </button>
+
+		<button type="button" onclick="if( stato_calcoloCostoMinimo == 1 ) { terminaOperazione = true; } else { print3('Operation not interrupted'); } " id="button_terminaOperazione"style="width:49%" >End task<br/>   </button>
+
+		<button type="button" onclick="selezionaRipristinaMarkerPOISiaAttiviSiaStazioniEsistenti()" id="button_selezionaRipristinaMarkerPOISiaAttiviSiaStazioniEsistenti" style="width:99%"  >
+			Shows only newly activated POI Markers and existing charging stations / Restore the initial display of POI Markers identified on map
+		</button>
+
+		<hr />
+
+		<button type="button" onclick="calcolaSADuAloc()" id="button_calcolaSADuAloc"style="width:49%" >Sensitivity Analysis with Du Aloc Algorithm (Excel)</button>
+
+		<button type="button" onclick="calcolaSASPLA()" id="button_calcolaSASPLA"style="width:49%" >Sensitivity Analysis with Simple Plant Location Algorithm (Excel)</button>
+
+		<hr />
+
+		<label id="label_progressBarCombinazioni" for="progressBarCombinazioni">  
+		Progress status - Iterations:  <input readonly type="text" onclick="" id="avanzamento" size="35" /> 
+		<progress id="progressBarCombinazioni" value="0" max="100" style="width:100%" ></progress>
+		
+		</label>
+
+		<button type="button" onclick="clearConsole3()" id="btn_clearConsole3">Clear Console</button>
+		<textarea readonly rows="45" id="textAreaAlgoritmi" ></textarea>
+
+	</div>
+
+	<div id="schedaPercorso">
+
+		<label id="label_titoloRicercaPercorso">::: SEARCH FOR A POSSIBLE ROUTE ON MAP :::</label>
+		<br/>
+
+		<label id="label_livelloCarica">- Battery charge level:
+			<input class="inputEditabile" type="number" min="1" max="100" onblur="livelloCarica= parseFloat( this.value , 10 )" id="livelloCarica" style="width: 50px"  />%
+		</label>
+
+		<label id="label_autonomiaMacchina">- Autonomy / Km range generally expected from the vehicle / device used: <input readonly type="text" onclick= "" id="autonomiaMacchina" value="100.000" style="width: 55px" /> Km 
+			<input 
+				type="range" min="0" max="300" value="100" id="range_autonomiaMacchina" 
+				oninput = "autonomiaMacchina = parseFloat( this.value , 10 ); document.getElementById('autonomiaMacchina').value = autonomiaMacchina.toFixed(3)" 
+				style="width: 100%" 
+			/>
+		</label>
+
+		<label id="label_variazioneTurfDistanzaMarkerPOI">- Expected distance from charging stations:<input readonly type="text" onclick="" id="variazioneTurfDistanzaMarkerPOI" value="0.200" style="width:50px" />Km
+			<input type="range" min="0" max="10000" value="200" id="range_variazioneTurfDistanzaMarkerPOI" oninput = "variazioneTurfDistanzaMarkerPOI()" onchange="variazioneTurfIntersezioni();" style="width:100%" /> 
+		</label>
+
+		<label id="label_tipoLocomozione" >- Mean of locomotion / transport used: car</label>
+		<!--
+		<select id="select_tipoLocomozione" style="width: 250px" selected = "car" onchange = "profileOSRM=this.value" >
+			<option value="car">Automobile elettrica</option>
+			<option value="bike">Biciclo elettrico</option>
+			<option value="foot">A piedi / Monopattino elettrico</option>
+		</select>
+		-->
+
+		<label id="label_trovaPercorsoSullaMappa">Find a possible route between two chosen points on map:</label>
+		<button type="button" onclick="trovaPercorsoSullaMappa()" id="button_trovaPercorsoSullaMappa">Find an itinerary or route</button>
+		<button type="button" onclick="rimuoviTrovaPercorsoSullaMappa()" id="button_rimuoviTrovaPercorsoSullaMappa">Remove the identified route or itinerary</button>
+		<br/>
+
+		<br/>
+
+		<button type="button" onclick="clearConsole4()" id="btn_clearConsole4">Clear Console</button>
+		<textarea readonly rows="56" id="textAreaPercorso" ></textarea>
+
+	</div>
+
+</div>
+language: html
+style:
+content: |-
+		body {
+			font-family:Tahoma; 
+			font-size:10px; 
+		}
+		
+		#parteSinistra { 
+			width: 52%; 
+			height: 100%; 
+			float: left;
+		}
+
+		#mappa { 
+			width: 100%; 
+			height: 400px;  
+		}
+
+		#coordinateValoriImpostazioni { 
+			width: 100%; 
+			height: 8%; 
+		}
+		
+		#coordinateValori { 
+			width: 100%; 
+			height: 50%; 
+		}
+		#coordinate { 
+			width: 55%; 
+			height: 100%; 
+			float: left;
+		}
+		#valori { 
+			width: 45%; 
+			height: 100%; 
+			float: right; 
+		}
+		#label_coordinate {
+			margin-top: 10px; 		
+		}
+		#impostazioni { 
+			width: 100%; 
+			height: 50%; 
+		}
+		#console { 
+			width: 100%; 
+			height:22%; 
+		}
+		
+		#parteDestra { 
+			width: 47%; 
+			height: 100%; 
+			float: right;
+			/* margin: 5px 5px 5px 5px; */
+		}
+		#textArea {
+			font-size:11px;
+			resize: none;
+			overflow-y:scroll;
+			width: 100%;
+			
+		}
+		#textAreaAHP {
+			font-size:11px;
+			resize: none;
+			overflow-y:scroll;
+			width: 100%; 
+			
+		}
+		#textAreaAlgoritmi {
+			font-size:11px;
+			resize: none;
+			overflow-y:scroll;
+			width: 100%; 
+			
+		}
+		#textAreaPercorso {
+			font-size:11px;
+			resize: none;
+			overflow-y:scroll;
+			width: 100%; 
+			
+		}
+		button{
+			margin: 1px;
+			font-family:Tahoma; 
+			font-size:10px; 
+			font-style: italic; 
+
+		}
+		
+		label{
+			display: block;
+			margin: 5px; 
+		}
+		#label_inputFile{
+			margin: 0px;
+			
+		}
+		#label_titoloRicercaColonnine {
+			font-style: italic;
+			font-weight: bold;
+			text-align: center;
+		}
+		#label_titoloRicercaPercorso {
+			font-style: italic;
+			font-weight: bold;
+			text-align: center;
+		}
+		
+		input {
+			border: none;
+			background: transparent;
+			font-family:Tahoma; 
+			font-size:10px; 
+		}
+
+		select{
+			margin: 1px;
+			font-family:Tahoma; 
+			font-size:10px; 
+			font-style: italic; 
+			font-weight : bold;
+
+		}
+		.inputEditabile {
+			font-style: italic;
+			font-weight: bold;
+			background: transparent;
+		}
+		
+		.leaflet-div-icon { 
+			background-color: transparent;
+			text-align: center;			
+		}
+		
+		.custom .leaflet-popup-tip,
+		.custom .leaflet-popup-content-wrapper {
+			//background:rgb(255, 255, 255, 0.90);
+			//color: red;
+			font-family: Consolas;
+			//font-style: italic;
+			font-size:11px;
+			padding: 1 1 1 1;
+			
+
+		}
+		
+		.tab {
+  			overflow: hidden;
+  			//border: 1px solid #ccc;
+  			//background-color: #f1f1f1;
+		}
+		.tabSingolo {
+			  //background-color: inherit;
+			  //float: left;
+			  font-style: italic;
+			  font-weight: bold;
+			  border: none;
+			 // outline: none;
+			  //cursor: pointer;
+			  //padding: 14px 16px;
+			  //transition: 0.3s;
+		}
+		
+		.matriceAHP td {
+			font-family:Tahoma; 
+			font-style: italic;
+			font-size:10px; 
+  			border: 1px solid #dddddd;
+ 			text-align: left;
+  			//padding: 8px;
+  			width: 60px;
+		}
+		
+		.legendaMatriceAHP td {
+			font-family:Tahoma; 
+			font-size:10px; 
+		}
+
+/*
+Author: L. Voogdt
+License: MIT
+Version: 1.0
+*/
+
+/* Marker setup */
+.awesome-marker {
+  background: url("https://raw.githubusercontent.com/GeoInf25/Applications/refs/heads/main/iconAwesomeWebApp/markers-soft.png") no-repeat 0 0;
+  width: 35px;
+  height: 46px;
+  position:absolute;
+  left:0;
+  top:0;
+  display: block;
+  text-align: center;
+}
+
+.awesome-marker-shadow {
+  background: url("https://raw.githubusercontent.com/GeoInf25/Applications/refs/heads/main/iconAwesomeWebApp/markers-shadow.png") no-repeat 0 0;
+  width: 36px;
+  height: 16px;
+}
+
+/* Retina displays */
+@media (min--moz-device-pixel-ratio: 1.5),(-o-min-device-pixel-ratio: 3/2),
+(-webkit-min-device-pixel-ratio: 1.5),(min-device-pixel-ratio: 1.5),(min-resolution: 1.5dppx) {
+ .awesome-marker {
+  background-image: url("https://raw.githubusercontent.com/GeoInf25/Applications/refs/heads/main/iconAwesomeWebApp/markers-soft%402x.png");
+  background-size: 720px 46px;
+ }
+ .awesome-marker-shadow {
+  background-image: url("https://raw.githubusercontent.com/GeoInf25/Applications/refs/heads/main/iconAwesomeWebApp/markers-shadow%402x.png");
+  background-size: 35px 16px;
+ }
+}
+
+.awesome-marker i {
+  color: #333;
+  margin-top: 10px;
+  display: inline-block;
+  font-size: 14px;
+}
+
+.awesome-marker .icon-white {
+  color: #fff;
+}
+
+/* Colors */
+.awesome-marker-icon-red {
+  background-position: 0 0;
+}
+
+.awesome-marker-icon-darkred {
+  background-position: -180px 0;
+}
+
+.awesome-marker-icon-lightred {
+  background-position: -360px 0;
+}
+
+.awesome-marker-icon-orange {
+  background-position: -36px 0;
+}
+
+.awesome-marker-icon-beige {
+  background-position: -396px 0;
+}
+
+.awesome-marker-icon-green {
+  background-position: -72px 0;
+}
+
+.awesome-marker-icon-darkgreen {
+  background-position: -252px 0;
+}
+
+.awesome-marker-icon-lightgreen {
+  background-position: -432px 0;
+}
+
+.awesome-marker-icon-blue {
+  background-position: -108px 0;
+}
+
+.awesome-marker-icon-darkblue {
+  background-position: -216px 0;
+}
+
+.awesome-marker-icon-lightblue {
+  background-position: -468px 0;
+}
+
+.awesome-marker-icon-purple {
+  background-position: -144px 0;
+}
+
+.awesome-marker-icon-darkpurple {
+  background-position: -288px 0;
+}
+
+.awesome-marker-icon-pink {
+  background-position: -504px 0;
+}
+
+.awesome-marker-icon-cadetblue {
+  background-position: -324px 0;
+}
+
+.awesome-marker-icon-white {
+  background-position: -574px 0;
+}
+
+.awesome-marker-icon-gray {
+  background-position: -648px 0;
+}
+
+.awesome-marker-icon-lightgray {
+  background-position: -612px 0;
+}
+
+.awesome-marker-icon-black {
+  background-position: -682px 0;
+}   
+language: css
+libraries: |-
+https://unpkg.com/leaflet@1.9.2/dist/leaflet.css
+https://unpkg.com/leaflet@1.9.2/dist/leaflet.js
+
+https://unpkg.com/@turf/turf@6/turf.min.js
+
+https://appsforoffice.microsoft.com/lib/1/hosted/office.js
+https://appsforoffice.microsoft.com/lib/1/hosted/office.d.ts
+
+https://unpkg.com/office-ui-fabric-core@11.1.0/dist/css/fabric.min.css
+https://unpkg.com/office-ui-fabric-js@1.5.0/dist/css/fabric.components.min.css
+
+
