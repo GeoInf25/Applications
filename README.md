@@ -1,3 +1,7 @@
+## SITE
+
+Visit the Site https://geoinf25.github.io/site/
+
 ## APPLICATIONS
 Some Applications created in the most common programming language. 
 ### -- Important note: libraries / frameworks and other elements associated with them are the property of their respective owners --
