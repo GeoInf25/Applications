@@ -1,6 +1,6 @@
-## SITE
+## Sito Web
 
-Visit the site https://geoinf25.github.io/site/
+Visita il sito https://geoinf25.github.io/site/
 
 ## APPLICATIONS
 Some Applications created in the most common programming language. 
